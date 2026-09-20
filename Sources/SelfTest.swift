@@ -867,6 +867,21 @@ enum SelfTest {
             check("打印管线生成 PDF", false, "无法构建 NSPrintOperation")
         }
 
+        // ---- 11b. 会话结束必须收掉所有浮窗 ----
+        log("")
+        log("[11b] 会话结束时收起浮窗")
+        // 先把各浮窗都触发出来
+        if let st2 = sc.activeCanvas {
+            sc.sampleColor(canvas: st2, at: CGPoint(x: 400, y: 400))
+        }
+        sc.showTooltip("Test-Tooltip")
+        pump(0.3)
+        let panelsBefore = NSApp.windows.filter {
+            ($0 is ColorInfoPanel || $0 is TooltipPanel || $0 is MagnifierPanel || $0 is ToastPanel) && $0.isVisible
+        }.count
+        check("退出前确实存在浮窗（测试有意义）", panelsBefore > 0, "\(panelsBefore) 个可见浮窗")
+        sc.showTooltip(nil)
+
         // ---- 12. 自动截图 ----
         log("")
         log("[12] 自动截图（Fertig 时）")
@@ -878,6 +893,14 @@ enum SelfTest {
         check("Fertig 后自动保存截图", shots.contains { $0.hasSuffix(".png") },
               "截图目录 \(shots.count) 个文件: \(shots.sorted().suffix(2).joined(separator: ", "))")
         check("会话已关闭", !sc.isActive, "active=\(sc.isActive)")
+
+        // 所有浮窗都必须跟着会话一起消失 —— 之前取色面板和悬停提示会遗留在屏幕上
+        let strays = NSApp.windows.filter {
+            ($0 is ColorInfoPanel || $0 is TooltipPanel || $0 is MagnifierPanel || $0 is ToastPanel)
+            && $0.isVisible
+        }
+        check("会话结束后没有遗留浮窗", strays.isEmpty,
+              strays.isEmpty ? "无" : strays.map { String(describing: type(of: $0)) }.joined(separator: ", "))
 
         // 复原设置
         Prefs.autoScreenshot = savedAuto

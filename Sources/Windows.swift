@@ -506,10 +506,7 @@ final class SessionController: NSObject, NSMenuDelegate {
 
         isActive = false
         model.isActive = false
-        magnifier?.orderOut(nil)
-        magnifier = nil
-        toast?.orderOut(nil)
-        toast = nil
+        dismissFloatingPanels()
         teardownWindows()
 
         if Prefs.quitOnFinish {
@@ -525,6 +522,28 @@ final class SessionController: NSObject, NSMenuDelegate {
             NSApp.deactivate()
         }
         _ = quiet
+    }
+
+    /// 收起"跟着按钮走"的提示浮窗。
+    /// 工具栏重建后按钮对象已销毁，提示若还在就会悬空 —— 只收这一个。
+    private func dismissTooltip() {
+        tooltip?.hide()
+        tooltip = nil
+    }
+
+    /// 收起会话期间创建的**全部**浮窗，会话结束（或提前失败）时调用。
+    ///
+    /// ⚠️ **新增浮窗时必须加到这里**。之前就漏了取色面板和悬停提示 ——
+    /// 结束会话后它们仍留在屏幕上（用户实测到的问题）。
+    ///
+    /// 注意区分：放大镜、提示条、取色面板都只在 `buildSession` 里创建一次，
+    /// 所以**只有会话结束才该销毁它们**。早先把本方法接到 `rebuildToolbar` 上，
+    /// 结果会话中途改一次形状分配就把放大镜永久置空了（测试抓到的回归）。
+    private func dismissFloatingPanels() {
+        magnifier?.orderOut(nil); magnifier = nil
+        toast?.orderOut(nil);     toast = nil
+        colorInfo?.orderOut(nil); colorInfo = nil
+        dismissTooltip()
     }
 
     private func teardownWindows() {
@@ -621,6 +640,7 @@ final class SessionController: NSObject, NSMenuDelegate {
     }
 
     func rebuildToolbar() {
+        dismissTooltip()             // 旧按钮已销毁，提示要跟着收；放大镜等会话级浮窗不能动
         guard isActive else { return }
         let origin = toolbarPanel?.frame.origin
         toolbarPanel?.orderOut(nil)

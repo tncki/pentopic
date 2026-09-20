@@ -800,6 +800,69 @@ final class SessionController: NSObject, NSMenuDelegate {
     @objc private func menuFinish() { finish() }
 }
 
+// MARK: - 浅色按钮
+
+/// 自绘按钮：深色面板上需要浅色底 + 深色字才看得清。
+/// AppKit 的圆角按钮在这个深蓝面板上会渲染成暗底黑字，对比度极低。
+final class LightButton: NSButton {
+    var fill = NSColor(srgbRed: 0.94, green: 0.96, blue: 1.0, alpha: 1)
+    var textColor = NSColor(srgbRed: 0.09, green: 0.15, blue: 0.30, alpha: 1)
+
+    private var hovering = false { didSet { needsDisplay = true } }
+    private var pressing = false { didSet { needsDisplay = true } }
+    private var tracking: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        wantsLayer = false
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = tracking { removeTrackingArea(t) }
+        let t = NSTrackingArea(rect: bounds,
+                               options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                               owner: self, userInfo: nil)
+        addTrackingArea(t)
+        tracking = t
+    }
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false; pressing = false }
+    override func mouseDown(with event: NSEvent) {
+        pressing = true
+        super.mouseDown(with: event)     // 让 NSButton 照常处理点击与高亮
+        pressing = false
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        var bg = fill
+        if pressing { bg = fill.blended(withFraction: 0.16, of: .black) ?? fill }
+        else if hovering { bg = fill.blended(withFraction: 0.06, of: .black) ?? fill }
+
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                xRadius: 7, yRadius: 7)
+        bg.setFill()
+        path.fill()
+        NSColor(srgbRed: 0.55, green: 0.62, blue: 0.80, alpha: 0.55).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font ?? NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: textColor
+        ]
+        let str = title as NSString
+        let size = str.size(withAttributes: attrs)
+        str.draw(at: NSPoint(x: (bounds.width - size.width) / 2,
+                             y: (bounds.height - size.height) / 2),
+                 withAttributes: attrs)
+    }
+}
+
 // MARK: - 启动按钮小窗
 
 final class StartButtonPanel: NSPanel {
@@ -837,10 +900,11 @@ final class StartButtonPanel: NSPanel {
         badge.alignment = .right
         container.addSubview(badge)
 
-        let btn = NSButton(title: LS("Start", "Start", "开始", "開始"), target: self, action: #selector(clicked))
-        btn.bezelStyle = .rounded
-        btn.font = .systemFont(ofSize: 13, weight: .semibold)
-        btn.frame = NSRect(x: 10, y: 8, width: 130, height: 28)
+        let btn = LightButton(frame: NSRect(x: 10, y: 8, width: 130, height: 28))
+        btn.title = LS("Start", "Start", "开始", "開始")
+        btn.target = self
+        btn.action = #selector(clicked)
+        btn.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         btn.keyEquivalent = ""
         container.addSubview(btn)
         contentView = container

@@ -22,6 +22,10 @@ if let raw = ProcessInfo.processInfo.environment["POFIX_LANG"], let l = AppLang(
     L.lang = .en
 }
 print("语言: \(L.lang.rawValue)")
+// 后面的诊断会调用 SettingsModel.save()，而它会执行 L.lang = Prefs.resolveLanguage()
+// （应用里的正常行为），从而覆盖这里的设置。先存下来，诊断结束后还原，
+// 否则后续所有渲染都会用被覆盖的语言。
+let intendedLang = L.lang
 
 // 四语对照抽样（验证繁体译文与简体结构一致、没有错位）
 let samples: [(String, String, String, String)] = [
@@ -122,6 +126,8 @@ do {
 
     Prefs.extraColors = []
     Prefs.setScreenshotFolder(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Pointofix/Screenshots"))
+    Prefs.language = nil                 // 别把诊断用的目录/语言写进持久化设置
+    L.lang = intendedLang                // 还原 save() 覆盖掉的全局语言
     print("")
 }
 
@@ -199,6 +205,15 @@ do {
 
     print("  快捷键规格: \(pass) 通过, \(fail) 失败")
     print("")
+}
+
+// ---------------------------------------------------------------- 1g. 启动按钮面板
+do {
+    let panel = StartButtonPanel { }
+    if let cv = panel.contentView {
+        cv.layoutSubtreeIfNeeded()
+        renderView(cv, named: "03-startbutton-\(L.lang.rawValue).png")
+    }
 }
 
 // ---------------------------------------------------------------- 2. 全部工具

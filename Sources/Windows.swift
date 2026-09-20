@@ -178,6 +178,65 @@ final class ToastPanel: NSPanel {
     @objc private func hideNow() { orderOut(nil) }
 }
 
+// MARK: - 延时捕捉倒计时
+
+/// 延时捕捉时显示的倒计时浮窗。用来截「打开的下拉菜单」这类需要先摆好界面的场景。
+final class CountdownPanel: NSPanel {
+    private let label = NSTextField(labelWithString: "")
+    private var timer: Timer?
+
+    init() {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 120, height: 120),
+                   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 5)
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        ignoresMouseEvents = true
+        isReleasedWhenClosed = false
+        label.font = .monospacedDigitSystemFont(ofSize: 72, weight: .bold)
+        label.textColor = .white
+        label.alignment = .center
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 120))
+        box.wantsLayer = true
+        box.layer?.backgroundColor = NSColor(srgbRed: 0.08, green: 0.09, blue: 0.12, alpha: 0.88).cgColor
+        box.layer?.cornerRadius = 20
+        box.layer?.borderWidth = 2
+        box.layer?.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
+        label.frame = NSRect(x: 0, y: 22, width: 120, height: 76)
+        box.addSubview(label)
+        contentView = box
+    }
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    func run(seconds: Int, then completion: @escaping () -> Void) {
+        var remaining = seconds
+        label.stringValue = "\(remaining)"
+        if let scr = NSScreen.main {
+            setFrameOrigin(NSPoint(x: scr.frame.midX - 60, y: scr.frame.midY - 60))
+        }
+        orderFrontRegardless()
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] t in
+            remaining -= 1
+            if remaining <= 0 {
+                t.invalidate()
+                self?.orderOut(nil)
+                completion()
+            } else {
+                self?.label.stringValue = "\(remaining)"
+            }
+        }
+    }
+
+    func cancel() {
+        timer?.invalidate(); timer = nil
+        orderOut(nil)
+    }
+}
+
 // MARK: - 悬停提示（自绘）
 //
 // SwiftUI 的 .help() 在 nonactivatingPanel（工具栏就是）里不会弹出，
@@ -355,6 +414,7 @@ final class SessionController: NSObject, NSMenuDelegate {
     private var hostingView: NSHostingView<ToolbarView>?
     var magnifier: MagnifierPanel?
     private var tooltip: TooltipPanel?
+    private var countdown: CountdownPanel?
     private var colorInfo: ColorInfoPanel?
     private var toast: ToastPanel?
     private var startPanel: StartButtonPanel?
@@ -382,6 +442,20 @@ final class SessionController: NSObject, NSMenuDelegate {
         guard !isActive else { return }
         // ensure() 在已授权时立即返回 true；否则循环引导授权，拿到权限后继续启动
         guard ScreenPermission.ensure() else { return }
+
+        // 延时捕捉：先把界面让给用户摆好（比如展开一个菜单），倒计时结束再冻结
+        let delay = synchronously ? 0 : Prefs.captureDelay
+        if delay > 0 {
+            if countdown == nil { countdown = CountdownPanel() }
+            countdown?.run(seconds: delay) { [weak self] in
+                self?.performStart(synchronously: synchronously)
+            }
+            return
+        }
+        performStart(synchronously: synchronously)
+    }
+
+    private func performStart(synchronously: Bool) {
         previousApp = NSWorkspace.shared.frontmostApplication
         NSApp.activate(ignoringOtherApps: true)
         isActive = true
@@ -540,6 +614,7 @@ final class SessionController: NSObject, NSMenuDelegate {
     /// 所以**只有会话结束才该销毁它们**。早先把本方法接到 `rebuildToolbar` 上，
     /// 结果会话中途改一次形状分配就把放大镜永久置空了（测试抓到的回归）。
     private func dismissFloatingPanels() {
+        countdown?.cancel();      countdown = nil
         magnifier?.orderOut(nil); magnifier = nil
         toast?.orderOut(nil);     toast = nil
         colorInfo?.orderOut(nil); colorInfo = nil
@@ -1228,7 +1303,10 @@ final class StartButtonPanel: NSPanel {
         container.addSubview(badge)
 
         let btn = LightButton(frame: NSRect(x: 10, y: 8, width: 130, height: 28))
-        btn.title = LS("Start", "Start", "开始", "開始")
+        let delay = Prefs.captureDelay
+        btn.title = delay > 0
+            ? LS("Start (\(delay) s)", "Start (\(delay) s)", "开始 (\(delay) 秒)", "開始 (\(delay) 秒)")
+            : LS("Start", "Start", "开始", "開始")
         btn.target = self
         btn.action = #selector(clicked)
         btn.font = NSFont.systemFont(ofSize: 13, weight: .semibold)

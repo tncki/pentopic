@@ -25,6 +25,8 @@ enum Prefs {
         static let paletteHexes = "paletteHexes"
         static let numberShape = "numberShape"
         static let shapeSlots = "shapeSlots"
+        static let filenameTemplate = "filenameTemplate"
+        static let captureDelay = "captureDelay"
         static let language = "language"
         static let hotKeyCode = "hotKeyCode"
         static let hotKeyModifiers = "hotKeyModifiers"
@@ -53,7 +55,9 @@ enum Prefs {
             K.hotKeyCode: 101,          // F9
             K.lastTool: ToolKind.pen.rawValue,
             K.lastSwatch: 0,
-            K.lastPenSize: 1
+            K.lastPenSize: 1,
+            K.filenameTemplate: "{app}-{date}-{time}",
+            K.captureDelay: 0
         ])
     }
 
@@ -117,6 +121,18 @@ enum Prefs {
     static var buttonH: CGFloat {
         get { max(22, CGFloat(d.integer(forKey: K.buttonH))) }
         set { d.set(Int(newValue), forKey: K.buttonH) }
+    }
+
+    /// 自动保存的文件名模板。占位符：{app} {date} {time} {n}
+    static var filenameTemplate: String {
+        get { d.string(forKey: K.filenameTemplate) ?? "{app}-{date}-{time}" }
+        set { d.set(newValue, forKey: K.filenameTemplate) }
+    }
+
+    /// 捕捉延时（秒）。0 = 立即捕捉；用来截「打开的下拉菜单」这类界面。
+    static var captureDelay: Int {
+        get { max(0, min(30, d.integer(forKey: K.captureDelay))) }
+        set { d.set(newValue, forKey: K.captureDelay) }
     }
 
     /// 用户右键改过的标准色槽位（空数组 = 全用默认色）

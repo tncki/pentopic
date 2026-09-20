@@ -208,7 +208,7 @@ struct ToolbarView: View {
          [.fixed(.blur), .fixed(.pixelate)],
          [.fixed(.eyedropper), .fixed(.region)],
          [.fixed(.magnifier), .fixed(.zoomIn)],
-         [.fixed(.zoomOut)]]
+         [.fixed(.ruler), .fixed(.zoomOut)]]
     }
 
     var body: some View {
@@ -420,11 +420,13 @@ struct ToolbarView: View {
                 Exporter.saveWithPanel(controller.activeCanvas, screen: controller.activeCanvas?.screen)
             }
             Divider()
-            Button(LS("Als PNG im Screenshot-Ordner ablegen", "Save PNG to screenshots folder", "存为 PNG 到截图文件夹", "儲存 PNG 到截圖資料夾")) {
-                Exporter.saveToFolder(controller.activeCanvas, format: .png)
-            }
-            Button(LS("Als JPG im Screenshot-Ordner ablegen", "Save JPG to screenshots folder", "存为 JPG 到截图文件夹", "儲存 JPG 到截圖資料夾")) {
-                Exporter.saveToFolder(controller.activeCanvas, format: .jpg)
+            ForEach(ExportFormat.allCases, id: \.rawValue) { fmt in
+                Button(LS("Als \(fmt.title) im Screenshot-Ordner ablegen",
+                          "Save \(fmt.title) to screenshots folder",
+                          "存为 \(fmt.title) 到截图文件夹",
+                          "儲存 \(fmt.title) 到截圖資料夾")) {
+                    Exporter.saveToFolder(controller.activeCanvas, format: fmt)
+                }
             }
             Divider()
             Button(LS("Screenshot-Ordner öffnen (⌘O)", "Open screenshots folder (⌘O)", "打开截图文件夹 (⌘O)", "開啟截圖資料夾 (⌘O)")) {

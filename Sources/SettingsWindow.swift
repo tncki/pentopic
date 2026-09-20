@@ -16,6 +16,8 @@ final class SettingsModel: ObservableObject {
     @Published var buttonW: Double = 30
     @Published var buttonH: Double = 30
     @Published var extraColors: [String] = []
+    @Published var filenameTemplate = "{app}-{date}-{time}"
+    @Published var captureDelay = 0
     @Published var hotKeySpec: HotKeySpec = .default
     @Published var hotKeyWarning: String?
 
@@ -33,6 +35,8 @@ final class SettingsModel: ObservableObject {
         buttonW = Double(Prefs.buttonW)
         buttonH = Double(Prefs.buttonH)
         extraColors = Prefs.extraColors
+        filenameTemplate = Prefs.filenameTemplate
+        captureDelay = Prefs.captureDelay
         hotKeySpec = Prefs.hotKeySpec
         hotKeyWarning = Prefs.hotKeySpec.conflictWarning
     }
@@ -52,6 +56,8 @@ final class SettingsModel: ObservableObject {
         // 之前这里漏了 —— load() 读了但 save() 从没写回，导致「选择…」改的目录点确定就丢
         Prefs.setScreenshotFolder(URL(fileURLWithPath: (screenshotFolder as NSString).expandingTildeInPath))
         Prefs.setEmailFolder(URL(fileURLWithPath: (emailFolder as NSString).expandingTildeInPath))
+        Prefs.filenameTemplate = filenameTemplate.isEmpty ? "{app}-{date}-{time}" : filenameTemplate
+        Prefs.captureDelay = captureDelay
         Prefs.extraColors = extraColors
         Prefs.ensureFolders()
         if hotKeySpec != Prefs.hotKeySpec {
@@ -126,6 +132,34 @@ struct SettingsView: View {
                             Text(LS("Höhe", "Height", "高度", "高度")).frame(width: 60, alignment: .leading)
                             Slider(value: $m.buttonH, in: 22...56, step: 1).frame(width: 160)
                             Text("\(Int(m.buttonH)) px").frame(width: 60)
+                        }
+                    }
+
+                    group(LS("Dateiname und Aufnahme", "Filename and capture", "文件名与捕捉", "檔名與捕捉")) {
+                        HStack(spacing: 8) {
+                            Text(LS("Namensvorlage", "Name template", "命名模板", "命名範本"))
+                                .frame(width: 150, alignment: .leading)
+                            TextField("", text: $m.filenameTemplate)
+                                .frame(width: 230)
+                                .onSubmit { m.save() }
+                        }
+                        Text(LS("Platzhalter: {app} Programmname · {date} Datum · {time} Uhrzeit · {n} laufende Nummer",
+                                "Placeholders: {app} app name · {date} date · {time} time · {n} running number",
+                                "占位符：{app} 程序名 · {date} 日期 · {time} 时间 · {n} 序号",
+                                "佔位符：{app} 程式名 · {date} 日期 · {time} 時間 · {n} 序號"))
+                            .font(.system(size: 10)).foregroundColor(.secondary)
+                        Text(LS("Vorschau:", "Preview:", "预览：", "預覽：") + " "
+                             + Exporter.renderBaseName(index: 1) + ".png")
+                            .font(.system(size: 10)).foregroundColor(.secondary)
+                        HStack(spacing: 8) {
+                            Text(LS("Verzögerte Aufnahme", "Delayed capture", "延时捕捉", "延時捕捉"))
+                                .frame(width: 150, alignment: .leading)
+                            Picker("", selection: $m.captureDelay) {
+                                Text(LS("Sofort", "Immediately", "立即", "立即")).tag(0)
+                                Text("3 s").tag(3)
+                                Text("5 s").tag(5)
+                                Text("10 s").tag(10)
+                            }.labelsHidden().frame(width: 120)
                         }
                     }
 

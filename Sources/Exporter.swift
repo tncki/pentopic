@@ -3,16 +3,20 @@ import AppKit
 import UniformTypeIdentifiers
 
 enum ExportFormat: String, CaseIterable {
-    case png, jpg, bmp
+    case png, jpg, bmp, gif, tiff, pdf
     var ext: String { rawValue }
     var utType: UTType {
         switch self {
-        case .png: return .png
-        case .jpg: return .jpeg
-        case .bmp: return .bmp
+        case .png:  return .png
+        case .jpg:  return .jpeg
+        case .bmp:  return .bmp
+        case .gif:  return .gif
+        case .tiff: return .tiff
+        case .pdf:  return .pdf
         }
     }
     var title: String { rawValue.uppercased() }
+    var isLossless: Bool { self == .png || self == .tiff || self == .pdf }
 }
 
 /// 用于文件名，避免产品名里的空格/斜杠出问题
@@ -31,12 +35,30 @@ enum Exporter {
     }
 
     static func encode(_ cg: CGImage, as format: ExportFormat, quality: CGFloat = 0.9) -> Data? {
+        if format == .pdf { return encodePDF(cg) }
         let rep = NSBitmapImageRep(cgImage: cg)
         switch format {
-        case .png: return rep.representation(using: .png, properties: [:])
-        case .jpg: return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
-        case .bmp: return rep.representation(using: .bmp, properties: [:])
+        case .png:  return rep.representation(using: .png, properties: [:])
+        case .jpg:  return rep.representation(using: .jpeg, properties: [.compressionFactor: quality])
+        case .bmp:  return rep.representation(using: .bmp, properties: [:])
+        case .gif:  return rep.representation(using: .gif, properties: [:])
+        case .tiff: return rep.representation(using: .tiff, properties: [:])
+        case .pdf:  return nil
         }
+    }
+
+    /// PDF 走 CGPDFContext —— NSBitmapImageRep 不支持 PDF 编码。
+    /// 页面按 1pt = 1px 设尺寸，打印时再按需缩放。
+    static func encodePDF(_ cg: CGImage) -> Data? {
+        let data = NSMutableData()
+        guard let consumer = CGDataConsumer(data: data) else { return nil }
+        var mediaBox = CGRect(x: 0, y: 0, width: CGFloat(cg.width), height: CGFloat(cg.height))
+        guard let ctx = CGContext(consumer: consumer, mediaBox: &mediaBox, nil) else { return nil }
+        ctx.beginPDFPage(nil)
+        ctx.draw(cg, in: mediaBox)
+        ctx.endPDFPage()
+        ctx.closePDF()
+        return data as Data
     }
 
     // MARK: 剪贴板
@@ -80,19 +102,15 @@ enum Exporter {
         }
         let panel = NSSavePanel()
         panel.title = LS("Bild speichern", "Save image", "保存图片", "儲存圖片")
-        panel.allowedContentTypes = [UTType.png, UTType.jpeg, UTType.bmp]
+        panel.allowedContentTypes = ExportFormat.allCases.map { $0.utType }
         panel.nameFieldStringValue = defaultName(format: .png)
         panel.canCreateDirectories = true
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 5)
 
         let resp = SessionController.shared.withSuspendedOverlays { panel.runModal() }
         guard resp == .OK, let url = panel.url else { return }
-        let fmt: ExportFormat
-        switch url.pathExtension.lowercased() {
-        case "jpg", "jpeg": fmt = .jpg
-        case "bmp": fmt = .bmp
-        default: fmt = .png
-        }
+        let ext = url.pathExtension.lowercased()
+        let fmt = ExportFormat(rawValue: ext) ?? (ext == "jpeg" ? .jpg : .png)
         write(cg, to: url, format: fmt)
     }
 
@@ -108,10 +126,24 @@ enum Exporter {
         }
     }
 
+    /// 按用户模板生成文件名（不含扩展名）。
+    /// 占位符：{app} 应用名、{date} 年月日、{time} 时分秒、{n} 序号
+    static func renderBaseName(index: Int = 0) -> String {
+        var t = Prefs.filenameTemplate
+        if t.trimmingCharacters(in: .whitespaces).isEmpty { t = "{app}-{date}-{time}" }
+        let df = DateFormatter(); df.dateFormat = "yyyyMMdd"
+        let tf = DateFormatter(); tf.dateFormat = "HHmmss"
+        let now = Date()
+        t = t.replacingOccurrences(of: "{app}", with: safeBrandName)
+             .replacingOccurrences(of: "{date}", with: df.string(from: now))
+             .replacingOccurrences(of: "{time}", with: tf.string(from: now))
+             .replacingOccurrences(of: "{n}", with: String(index))
+        for bad in ["/", ":", "\\"] { t = t.replacingOccurrences(of: bad, with: "-") }
+        return t.isEmpty ? safeBrandName : t
+    }
+
     static func defaultName(format: ExportFormat) -> String {
-        let df = DateFormatter()
-        df.dateFormat = "yyyyMMdd-HHmmss"
-        return "\(safeBrandName)-\(df.string(from: Date())).\(format.ext)"
+        "\(renderBaseName()).\(format.ext)"
     }
 
     /// 自动命名保存到截图文件夹
@@ -134,19 +166,13 @@ enum Exporter {
     }
 
     private static func uniqueURL(in folder: URL, format: ExportFormat) -> URL {
-        let df = DateFormatter()
-        df.dateFormat = "yyyyMMdd-HHmmss"
-        let base = df.string(from: Date())
-        let auto = Prefs.autoScreenshot
         var n = 1
-        while true {
-            let candidate = folder.appendingPathComponent("\(base)-\(n).\(format.ext)")
+        while n <= 9999 {
+            let candidate = folder.appendingPathComponent("\(renderBaseName(index: n)).\(format.ext)")
             if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
             n += 1
-            if n > 9999 { break }
-            _ = auto
         }
-        return folder.appendingPathComponent("\(base)-\(Int.random(in: 1000...9999)).\(format.ext)")
+        return folder.appendingPathComponent("\(renderBaseName(index: Int.random(in: 1000...9999))).\(format.ext)")
     }
 
     /// 'Fertig' 时自动截图（整屏，忽略选区）

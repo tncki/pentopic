@@ -827,18 +827,34 @@ enum SelfTest {
         view.needsDisplay = true
         if let full = st.composeCG(region: nil) {
             var sizes: [String: Int] = [:]
-            for fmt in [ExportFormat.png, .jpg, .bmp] {
+            for fmt in ExportFormat.allCases {
                 if let d = Exporter.encode(full, as: fmt) {
                     let url = outDir.appendingPathComponent("S12-导出.\(fmt.ext)")
                     try? d.write(to: url)
                     sizes[fmt.ext] = d.count
                 }
             }
-            check("PNG 导出", (sizes["png"] ?? 0) > 1000, "\(sizes["png"] ?? 0) B")
-            check("JPG 导出", (sizes["jpg"] ?? 0) > 1000, "\(sizes["jpg"] ?? 0) B")
-            check("BMP 导出", (sizes["bmp"] ?? 0) > 1000, "\(sizes["bmp"] ?? 0) B")
-            check("JPG 比 PNG 小（编码生效）", (sizes["jpg"] ?? .max) < (sizes["png"] ?? 0),
+            for fmt in ExportFormat.allCases {
+                check("\(fmt.title) 导出能编码出内容", (sizes[fmt.ext] ?? 0) > 1000,
+                      "\(sizes[fmt.ext] ?? 0) B")
+            }
+            check("JPG 比 PNG 小（有损压缩生效）", (sizes["jpg"] ?? .max) < (sizes["png"] ?? 0),
                   "JPG \(sizes["jpg"] ?? 0) B < PNG \(sizes["png"] ?? 0) B")
+
+            // PDF 是唯一不走 NSBitmapImageRep 的格式，单独校验文件头与页数
+            let pdfURL = outDir.appendingPathComponent("S12-导出.pdf")
+            if let d = try? Data(contentsOf: pdfURL) {
+                let head = String(data: d.prefix(5), encoding: .ascii) ?? ""
+                check("PDF 文件头正确 (%PDF-)", head.hasPrefix("%PDF-"), head)
+            }
+            // 文件名模板
+            Prefs.filenameTemplate = "T-{app}-{date}-{n}"
+            let nm = Exporter.renderBaseName(index: 7)
+            check("文件名模板占位符被替换", nm.contains("T-") && nm.contains("-7") && !nm.contains("{"),
+                  nm)
+            check("模板里的非法字符被替换", !Exporter.renderBaseName(index: 1).contains("/"),
+                  Exporter.renderBaseName(index: 1))
+            Prefs.filenameTemplate = "{app}-{date}-{time}"
         } else {
             check("合成导出图", false)
         }

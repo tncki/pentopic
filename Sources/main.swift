@@ -65,6 +65,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: LS("Start / Fertig  (F9)", "Start / Finish  (F9)", "开始 / 完成  (F9)", "開始 / 完成  (F9)"),
                      action: #selector(menuToggle), keyEquivalent: "")
+        let delayItem = NSMenuItem(title: LS("Verzögerte Aufnahme", "Delayed capture", "延时捕捉", "延時捕捉"),
+                                   action: nil, keyEquivalent: "")
+        let delayMenu = NSMenu()
+        for (title, secs) in [(LS("Sofort", "Immediately", "立即", "立即"), 0),
+                              ("3 s", 3), ("5 s", 5), ("10 s", 10)] {
+            let it = NSMenuItem(title: title, action: #selector(menuSetDelay(_:)), keyEquivalent: "")
+            it.target = self
+            it.tag = secs
+            it.state = (Prefs.captureDelay == secs) ? .on : .off
+            delayMenu.addItem(it)
+        }
+        delayItem.submenu = delayMenu
+        menu.addItem(delayItem)
+
         menu.addItem(.separator())
         menu.addItem(withTitle: LS("Screenshot-Ordner öffnen", "Open screenshots folder", "打开截图文件夹", "開啟截圖資料夾"),
                      action: #selector(menuOpenFolder), keyEquivalent: "")
@@ -79,6 +93,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuToggle() { SessionController.shared.toggle() }
+
+    @objc private func menuSetDelay(_ sender: NSMenuItem) {
+        Prefs.captureDelay = sender.tag
+        if let m = sender.menu {
+            for it in m.items { it.state = (it.tag == sender.tag) ? .on : .off }
+        }
+        SessionController.shared.flashStatus(sender.tag == 0
+            ? LS("Aufnahme: sofort", "Capture: immediately", "捕捉：立即", "捕捉：立即")
+            : LS("Aufnahme nach \(sender.tag) s", "Capture after \(sender.tag) s",
+                 "延时 \(sender.tag) 秒后捕捉", "延時 \(sender.tag) 秒後捕捉"))
+    }
     @objc private func menuOpenFolder() { Exporter.openScreenshotFolder() }
     @objc private func menuSettings() { SettingsWindowController.shared.show() }
     @objc private func menuAbout() {

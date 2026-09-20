@@ -381,7 +381,7 @@ final class CanvasView: NSView {
             switch tool {
             case .pen, .eraser, .line, .arrow, .doubleArrow, .rect, .rectFilled,
                  .ellipse, .ellipseFilled, .check, .cross,
-                 .number, .spotlight, .blur, .pixelate:
+                 .number, .spotlight, .blur, .pixelate, .ruler:
                 return CursorFactory.dot(size: max(6, c.penSize))
             case .text:
                 return CursorFactory.text()
@@ -616,7 +616,7 @@ final class CanvasView: NSView {
             }
             needsDisplay = true
         case .line, .arrow, .doubleArrow, .rect, .rectFilled, .ellipse, .ellipseFilled,
-             .spotlight, .blur, .pixelate:
+             .spotlight, .blur, .pixelate, .ruler:
             if (c.tool == .blur || c.tool == .pixelate) && state.currentBackgroundCG() == nil {
                 c.flashStatus(LS("Dieses Blatt hat keinen Inhalt zum Unkenntlichmachen – nur bei „Aktueller Bildschirm“ oder „Aus Zwischenablage“ möglich.",
                                  "This sheet has nothing to redact — redaction works on “Current screen” or “Paste from clipboard”.",
@@ -725,6 +725,11 @@ final class CanvasView: NSView {
             live = Stroke(shape: .spotlight(makeRect(dragStart, p, constrain: shift)),
                           color: c.currentColor, width: c.penSize)
             needsDisplay = true
+        case .ruler:
+            let end = constrained(dragStart, p, square: false, snap45: shift)
+            let px = hypot(end.x - dragStart.x, end.y - dragStart.y) * state.scale
+            live = Stroke(shape: .ruler(dragStart, end, px), color: c.currentColor, width: c.penSize)
+            needsDisplay = true
         case .blur:
             live = Stroke(shape: .redact(makeRect(dragStart, p, constrain: shift), .blur),
                           color: c.currentColor, width: c.penSize)
@@ -767,11 +772,14 @@ final class CanvasView: NSView {
             }
         case .line, .arrow, .doubleArrow, .rect, .rectFilled, .ellipse, .ellipseFilled:
             if let s = live { commit(s) }
-        case .spotlight, .blur, .pixelate:
+        case .spotlight, .blur, .pixelate, .ruler:
             // 拖得太小就当作误触，不留下一条没有意义的笔画
             if let s = live, case .spotlight(let r) = s.shape, r.width > 6, r.height > 6 {
                 commit(s)
             } else if let s = live, case .redact(let r, _) = s.shape, r.width > 6, r.height > 6 {
+                commit(s)
+            } else if let s = live, case .ruler(let a, let b, _) = s.shape,
+                      hypot(b.x - a.x, b.y - a.y) > 8 {
                 commit(s)
             } else {
                 live = nil

@@ -77,6 +77,7 @@ enum ToolKind: String, CaseIterable {
     case spotlight         // 聚焦高亮：其余部分压暗
     case blur, pixelate    // 打码：模糊 / 像素化
     case eyedropper        // 屏幕取色
+    case ruler             // 屏幕标尺
     case region, magnifier
     case zoomIn, zoomOut
 
@@ -99,6 +100,7 @@ enum ToolKind: String, CaseIterable {
         case .blur: return "drop.fill"
         case .pixelate: return "squareshape.split.3x3"
         case .eyedropper: return "eyedropper"
+        case .ruler: return "ruler"
         case .region: return "rectangle.dashed"
         case .magnifier: return "magnifyingglass"
         case .zoomIn: return "plus.magnifyingglass"
@@ -125,6 +127,7 @@ enum ToolKind: String, CaseIterable {
         case .blur: return LS("Weichzeichnen", "Blur", "模糊打码", "模糊打碼")
         case .pixelate: return LS("Verpixeln", "Pixelate", "马赛克打码", "馬賽克打碼")
         case .eyedropper: return LS("Farbpipette", "Colour picker", "颜色吸管", "顏色吸管")
+        case .ruler: return LS("Lineal", "Ruler", "屏幕标尺", "螢幕標尺")
         case .region: return LS("Bildbereich wählen", "Select region", "选区", "選取範圍")
         case .magnifier: return LS("Lupe", "Magnifier", "放大镜", "放大鏡")
         case .zoomIn: return LS("Hineinzoomen", "Zoom in", "放大视图", "放大檢視")
@@ -152,6 +155,7 @@ enum ToolKind: String, CaseIterable {
         case .blur: return "U"
         case .pixelate: return "I"
         case .eyedropper: return "C"
+        case .ruler: return "L"
         case .region: return "F"
         case .magnifier: return "M"
         case .zoomIn: return "+"
@@ -303,6 +307,7 @@ enum Shape {
     case number(Int, CGPoint, CGFloat, NumberShape)   // 序号、中心、直径、标记形状
     case spotlight(CGRect)                // 聚焦区（其余压暗）
     case redact(CGRect, RedactStyle)      // 打码区（读取底图做滤镜）
+    case ruler(CGPoint, CGPoint, CGFloat) // 标尺两端 + 像素长度
 }
 
 /// 序号的标记形状
@@ -427,6 +432,8 @@ enum ShapeRenderer {
             drawNumber(ctx, n, center: c, diameter: d, shape: ns, color: stroke.color)
         case .spotlight(let r):
             drawSpotlight(ctx, r)
+        case .ruler(let a, let b, let px):
+            drawRuler(ctx, a, b, px, color: stroke.color)
         case .redact:
             // 真正的打码由 AnnotationLayer 处理（它拿得到底图）。
             // 走到这里只可能是实时预览，画个占位提示。
@@ -546,6 +553,68 @@ enum ShapeRenderer {
         let ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
         ctx.textMatrix = .identity
         ctx.translateBy(x: center.x - ink.midX, y: center.y + ink.midY)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.textPosition = .zero
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
+    }
+
+    /// 屏幕标尺：带刻度的直线 + 像素长度标注
+    private static func drawRuler(_ ctx: CGContext, _ a: CGPoint, _ b: CGPoint,
+                                  _ lengthPx: CGFloat, color: NSColor) {
+        let dx = b.x - a.x, dy = b.y - a.y
+        let len = max(0.001, sqrt(dx * dx + dy * dy))
+        let ux = dx / len, uy = dy / len
+        let nx = -uy, ny = ux                       // 法线，用于画刻度
+        let c = (color.usingColorSpace(.sRGB) ?? color)
+
+        ctx.saveGState()
+        ctx.setLineCap(.butt)
+        ctx.setLineJoin(.miter)
+
+        // 主线
+        ctx.setStrokeColor(c.cgColor)
+        ctx.setLineWidth(1.5)
+        ctx.beginPath(); ctx.move(to: a); ctx.addLine(to: b); ctx.strokePath()
+
+        // 刻度：每 10 个点一个长刻度，中间每 2 点一个点
+        let step: CGFloat = 2
+        let majorEvery = 5
+        var i = 0
+        var t: CGFloat = 0
+        while t <= len {
+            let px = a.x + ux * t, py = a.y + uy * t
+            let isMajor = i % majorEvery == 0
+            let isEnd = t < 0.5 || t > len - 0.5
+            let h: CGFloat = isEnd ? 12 : (isMajor ? 9 : 4)
+            ctx.setLineWidth(isEnd ? 2 : 1)
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: px - nx * h / 2, y: py - ny * h / 2))
+            ctx.addLine(to: CGPoint(x: px + nx * h / 2, y: py + ny * h / 2))
+            ctx.strokePath()
+            t += step
+            i += 1
+        }
+
+        // 长度标注（放在中点外侧）
+        let label = "\(Int(lengthPx.rounded())) px"
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: c]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: label, attributes: attrs))
+        let bounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        let mid = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+        let pad: CGFloat = 16
+        let ox = mid.x + nx * pad - bounds.width / 2 - bounds.minX
+        let oy = mid.y + ny * pad
+
+        // 底衬，保证在复杂画面上也读得清
+        let box = CGRect(x: ox + bounds.minX - 5, y: oy - bounds.maxY - 3,
+                         width: bounds.width + 10, height: bounds.height + 6)
+        ctx.setFillColor(NSColor.white.withAlphaComponent(0.88).cgColor)
+        ctx.fill(box)
+
+        ctx.textMatrix = .identity
+        ctx.translateBy(x: ox, y: oy)
         ctx.scaleBy(x: 1, y: -1)
         ctx.textPosition = .zero
         CTLineDraw(line, ctx)

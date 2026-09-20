@@ -10,3 +10,7 @@ probe*/
 # ⚠️ 从 pointofix.de 下载的原站截图（受版权保护，绝对不能提交）
 ref/
 AUTHORIZATION-EMAIL.md
+
+# macOS Finder 元数据
+.DS_Store
+**/.DS_Store

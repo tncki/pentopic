@@ -1004,6 +1004,36 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     func pasteFromClipboard() { setBackground(.clipboard) }
 
+    // MARK: 窗口捕捉
+
+    /// 抓取指定窗口，并直接以它为画布开启会话
+    func captureWindow(id: CGWindowID) {
+        let all = ScreenCapture.windows()
+        guard let info = all.first(where: { $0.id == id }) else { return }
+        let screen = NSScreen.screens.first { $0.frame.intersects(info.frame) } ?? NSScreen.main
+        guard let screen else { return }
+        let scale = screen.backingScaleFactor
+        guard let img = ScreenCapture.captureWindow(id: id, scale: scale) else {
+            Alert.error(LS("Fenster konnte nicht aufgenommen werden",
+                           "Could not capture the window",
+                           "无法抓取该窗口", "無法抓取該視窗"),
+                        LS("Das Fenster ist möglicherweise geschlossen oder geschützt.",
+                           "The window may be closed or protected.",
+                           "该窗口可能已关闭或受保护。", "該視窗可能已關閉或受保護。"))
+            return
+        }
+        previousApp = NSWorkspace.shared.frontmostApplication
+        NSApp.activate(ignoringOtherApps: true)
+        isActive = true
+        model.isActive = true
+        startPanel?.orderOut(nil)
+        Prefs.ensureFolders()
+        buildSession(specs: [CanvasSpec(screen: screen, image: img, rect: info.frame)])
+        flashStatus(LS("Fenster aufgenommen: \(info.title)",
+                       "Window captured: \(info.title)",
+                       "已捕捉窗口：\(info.title)", "已捕捉視窗：\(info.title)"))
+    }
+
     // MARK: 区域捕捉
 
     /// 把当前画布裁剪到选中的区域：只保留那一块，成为新的画布。

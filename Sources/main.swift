@@ -1,7 +1,7 @@
 // main.swift — 应用入口：菜单栏常驻小工具 + 启动按钮窗口
 import AppKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var startPanel: StartButtonPanel!
     private var statusItem: NSStatusItem?
@@ -65,6 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: LS("Start / Fertig  (F9)", "Start / Finish  (F9)", "开始 / 完成  (F9)", "開始 / 完成  (F9)"),
                      action: #selector(menuToggle), keyEquivalent: "")
+        // 窗口列表在菜单展开时才枚举 —— 提前枚举会拿到过期结果
+        let windowItem = NSMenuItem(title: LS("Fenster aufnehmen", "Capture window", "捕捉窗口", "捕捉視窗"),
+                                    action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu()
+        windowMenu.delegate = self
+        windowItem.submenu = windowMenu
+        menu.addItem(windowItem)
+
         let delayItem = NSMenuItem(title: LS("Verzögerte Aufnahme", "Delayed capture", "延时捕捉", "延時捕捉"),
                                    action: nil, keyEquivalent: "")
         let delayMenu = NSMenu()
@@ -93,6 +101,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func menuToggle() { SessionController.shared.toggle() }
+
+    /// 展开「捕捉窗口」子菜单时才去枚举窗口
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let wins = ScreenCapture.windows()
+        guard !wins.isEmpty else {
+            menu.addItem(withTitle: LS("Keine Fenster gefunden", "No windows found",
+                                       "没有找到可捕捉的窗口", "沒有找到可捕捉的視窗"),
+                         action: nil, keyEquivalent: "")
+            return
+        }
+        for w in wins.prefix(30) {
+            let it = NSMenuItem(title: "\(w.app) — \(w.title)",
+                                action: #selector(menuPickWindow(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = NSNumber(value: w.id)
+            menu.addItem(it)
+        }
+    }
+
+    @objc private func menuPickWindow(_ sender: NSMenuItem) {
+        guard let n = sender.representedObject as? NSNumber else { return }
+        SessionController.shared.captureWindow(id: CGWindowID(n.uint32Value))
+    }
 
     @objc private func menuSetDelay(_ sender: NSMenuItem) {
         Prefs.captureDelay = sender.tag

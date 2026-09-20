@@ -97,6 +97,74 @@ enum ScreenCapture {
 }
 
 
+// MARK: - 窗口捕捉
+
+struct WindowInfo {
+    let id: CGWindowID
+    let title: String
+    let app: String
+    /// Cocoa 屏幕坐标（原点在左下）
+    let frame: CGRect
+}
+
+extension ScreenCapture {
+
+    /// 列出当前屏幕上可捕捉的窗口（已按面积从大到小排序，过滤掉过小的辅助窗口）
+    static func windows() -> [WindowInfo] {
+        guard let list = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        // Quartz 的窗口坐标原点在**主屏左上**，要转成 Cocoa 的左下原点
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        let myPID = ProcessInfo.processInfo.processIdentifier
+
+        var out: [WindowInfo] = []
+        for w in list {
+            guard let layer = w[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+            guard let pid = w[kCGWindowOwnerPID as String] as? Int32, pid != myPID else { continue }
+            guard let boundsDict = w[kCGWindowBounds as String] as? [String: Any],
+                  let q = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else { continue }
+            guard q.width >= 80, q.height >= 60 else { continue }
+            let app = (w[kCGWindowOwnerName as String] as? String) ?? "?"
+            let rawTitle = (w[kCGWindowName as String] as? String) ?? ""
+            let title = rawTitle.isEmpty ? app : rawTitle
+            let cocoa = CGRect(x: q.minX, y: primaryHeight - q.maxY,
+                               width: q.width, height: q.height)
+            out.append(WindowInfo(id: w[kCGWindowNumber as String] as? CGWindowID ?? 0,
+                                  title: title, app: app, frame: cocoa))
+        }
+        return out.sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
+    }
+
+    /// 抓取指定窗口（排除窗口阴影，否则画布会比窗口本身大一圈）
+    static func captureWindow(id: CGWindowID, scale: CGFloat) -> CGImage? {
+        guard #available(macOS 14.0, *) else { return nil }
+        let sem = DispatchSemaphore(value: 0)
+        var out: CGImage?
+        Task.detached(priority: .userInitiated) {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false,
+                                                                                 onScreenWindowsOnly: true)
+                guard let win = content.windows.first(where: { $0.windowID == id }) else {
+                    sem.signal(); return
+                }
+                let filter = SCContentFilter(desktopIndependentWindow: win)
+                let cfg = SCStreamConfiguration()
+                cfg.width = Int((win.frame.width * scale).rounded())
+                cfg.height = Int((win.frame.height * scale).rounded())
+                cfg.showsCursor = false
+                cfg.ignoreShadowsSingleWindow = true
+                cfg.captureResolution = .best
+                out = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
+            } catch { out = nil }
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 10)
+        return out
+    }
+}
+
 // MARK: - 自检用合成画面
 
 extension ScreenCapture {

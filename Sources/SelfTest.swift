@@ -939,6 +939,30 @@ enum SelfTest {
         }
         // 注意：裁剪会重建整个会话，测试里早先捕获的 st / view 引用会失效。
         // 所以本段必须放在**所有其它用例之后**，否则后续用例会操作已销毁的对象。
+        // ---- 11c. 窗口捕捉 ----
+        log("")
+        log("[11c] 窗口捕捉")
+        let wins = ScreenCapture.windows()
+        check("能枚举到可捕捉窗口", !wins.isEmpty, "\(wins.count) 个")
+        if let biggest = wins.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) {
+            log("  最大窗口: \(biggest.app) — \(biggest.title)  \(Int(biggest.frame.width))×\(Int(biggest.frame.height))")
+            let scr = NSScreen.screens.first { $0.frame.intersects(biggest.frame) } ?? NSScreen.main
+            let sc2 = scr?.backingScaleFactor ?? 2
+            check("窗口尺寸不超过屏幕", biggest.frame.width <= 4000 && biggest.frame.height <= 4000,
+                  "\(Int(biggest.frame.width))×\(Int(biggest.frame.height))")
+            // 真正抓一次，验证 SCK 的窗口捕捉链路可用
+            let t0 = Date()
+            let img = ScreenCapture.captureWindow(id: biggest.id, scale: sc2)
+            let dt = Date().timeIntervalSince(t0)
+            check("能真正抓到窗口内容", img != nil,
+                  img.map { "\($0.width)×\($0.height) px, \(String(format: "%.2f", dt))s" } ?? "失败")
+            if let img {
+                let expectW = Int(biggest.frame.width * sc2)
+                check("窗口图像尺寸与窗口一致", abs(img.width - expectW) <= 4,
+                      "实际 \(img.width) px，期望 \(expectW) px")
+            }
+        }
+
         // ---- 12. 自动截图 ----
         log("")
         log("[12] 自动截图（Fertig 时）")

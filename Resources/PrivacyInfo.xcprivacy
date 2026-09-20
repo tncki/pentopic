@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  隐私清单（Privacy Manifest）。
+
+  · Developer ID 分发：非强制，但建议带上（未来可能强制）。
+  · Mac App Store：**强制**。自 2024 年起，使用「需声明理由的 API」
+    必须在隐私清单里列明理由码，否则上传会被拒。
+
+  本应用的事实声明：
+  · 不追踪用户（NSPrivacyTracking = false）
+  · 不收集任何数据（NSPrivacyCollectedDataTypes 为空）
+    —— 截图只在本机内存/磁盘处理，不发起任何网络请求，不上传。
+  · 使用了 UserDefaults（存偏好设置）与系统启动时间 API（自检用事件时间戳）
+-->
+<plist version="1.0">
+<dict>
+    <key>NSPrivacyTracking</key>
+    <false/>
+
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <!-- 应用自身读取/写入自己的偏好设置 -->
+                <string>CA92.1</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <!-- 仅用于测量应用内事件的时间间隔 -->
+                <string>35F9.1</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # 公共仓库的 macOS runner 免费；构建产物是「通用二进制」，Intel 与 Apple Silicon 通用
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境信息
+        run: |
+          sw_vers
+          swift --version
+          echo "--- app.conf 里的产品身份 ---"
+          grep -E '^(APP_NAME|BUNDLE_ID|VERSION)=' app.conf || true
+
+      - name: 本地化完整性检查
+        run: python3 Tools/check-l10n.py
+
+      - name: 构建（通用二进制）
+        run: ./build.sh --universal
+
+      - name: 校验产物
+        run: |
+          set -e
+          APP=$(ls -d build/*.app | head -1)
+          echo "APP=$APP"
+          test -f "$APP/Contents/Info.plist"
+          test -f "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
+          echo "--- 架构 ---"
+          lipo -info "$APP/Contents/MacOS/"*
+          echo "--- 签名 ---"
+          codesign -dvv "$APP" 2>&1 | grep -E "^Identifier|Signature|flags=" || true
+          echo "--- Info.plist 关键字段 ---"
+          plutil -p "$APP/Contents/Info.plist" | grep -E "CFBundleIdentifier|CFBundleShortVersionString|LSUIElement"
+
+      - name: 提示（未签名包在用户的 Mac 上会被 Gatekeeper 拦）
+        run: |
+          echo "::notice::此构建为 ad-hoc 签名。用户从 Releases 下载后需要执行"
+          echo "::notice::  xattr -dr com.apple.quarantine <App>.app"
+          echo "::notice::或者让用户直接 clone 源码跑 ./build.sh（本地编译不会被拦截）。"

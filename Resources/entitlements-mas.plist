@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mac App Store 用的 entitlements（必须开启 App Sandbox）。
+
+  ⚠️ 走 MAS 路线时，代码还需要配合改动，否则沙箱下会失效：
+     1. 截图目录不能再用 ~/Documents/<App>/Screenshots
+        （沙箱只能写自己的容器），要改成容器内路径，
+        或首次运行时用 NSOpenPanel 让用户选目录并存 security-scoped bookmark。
+     2. 权限引导里的 x-apple.systempreferences: 是**未公开 URL scheme**，
+        MAS 审核有被拒风险，需要退化为纯文字指引。
+     3. 必须随包提供 PrivacyInfo.xcprivacy（本仓库已生成）。
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- 保存截图 / 选择截图目录 -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+
+    <!-- 打印 -->
+    <key>com.apple.security.print</key>
+    <true/>
+
+    <!-- 默认截图目录（容器内 ~/Documents） -->
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+</dict>
+</plist>

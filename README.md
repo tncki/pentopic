@@ -1,0 +1,397 @@
+# PentoPic
+
+把 **[www.pointofix.de](https://www.pointofix.de/)** 的 Windows 屏幕标注软件 **Pointofix 1.8**
+复刻成 macOS 原生应用（Swift + AppKit + SwiftUI，无 Electron、无第三方依赖）。
+
+> 原版 Pointofix 是 Thomas Gottfried EDV 的免费软件（Freeware）。
+> 本项目是行为与界面布局对齐原版的 macOS 移植实现。
+
+---
+
+## ⚠️ 发布前必读：名称与知识产权
+
+本项目的产品名是 **PentoPic**，Bundle ID 是 `io.github.tncki.pentopic`（GitHub 开源约定）。
+
+**绝对不要改回 `Pointofix` / `de.pointofix.mac`。** 前者是 Thomas Gottfried EDV 的
+产品名，后者是其域名 —— 使用它们会构成商标侵权与开发者身份冒用。
+
+「关于」对话框与 README 已明确声明：本项目是**受 Pointofix 启发的独立实现**，
+不包含原作任何代码与美术资源，与原作无隶属关系。详见 `NOTICE.md`。
+
+> Bundle ID 用 GitHub 开源惯例 `io.github.<用户名>.<应用名>`，已确认为 **io.github.tncki.pentopic**。
+
+如果想取得原作者的正式许可，`AUTHORIZATION-EMAIL.md` 里有中/德/英三语的邮件草稿。
+
+## 发布与分发
+
+### 方案一：GitHub 免费分发（$0）
+
+推 tag 就自动构建并发布（`.github/workflows/release.yml`）：
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+CI 打出的是**通用二进制**（`x86_64 + arm64` 合一，一个包两种 Mac 都能跑）。
+
+**但有一个必须知道的代价。** Apple 从 macOS 15 起取消了"右键 → 打开"绕过 Gatekeeper
+的方式，[官方公告原文](https://developer.apple.com/news/?id=saqachfa)：
+
+> users will no longer be able to Control-click to override Gatekeeper when opening
+> software that isn't signed correctly or notarized. They'll need to visit
+> System Settings > Privacy & Security.
+
+所以未公证的包，用户必须手动放行。两种应对：
+
+| 方式 | 用户操作 | Gatekeeper |
+|---|---|---|
+| **A. 让用户自己编译**（推荐） | `git clone` → `./build.sh` → `open build/xxx.app` | ✅ **完全不拦**（本地编译的 app 没有 quarantine 属性） |
+| **B. 下载预编译包** | 解压后执行 `xattr -dr com.apple.quarantine /Applications/xxx.app` | ⚠️ 需手动放行，否则要在系统设置里点"仍要打开" |
+
+建议 **A 为主、B 为辅**：README 里把源码构建放第一位，Releases 提供便利包并附一行命令。
+
+> 补充：如果你是**非营利组织、教育机构或政府机构**，可以向 Apple 申请
+> [会员费豁免](https://developer.apple.com/help/account/membership/fee-waivers/)，
+> 通过后就能免费使用 Developer ID 签名与公证。
+
+### 方案二：Developer ID + 公证（$99/年）
+
+**公证没有免费路径** —— 必须有付费的 Apple Developer Program 会员资格。
+它的价值是让用户**双击即开、零提示**，对非技术用户很重要。
+
+不需要装 Xcode，只靠 Command Line Tools 就能完成全流程
+（`notarytool` / `stapler` / `codesign` 都随 CLT 提供，本机已实测可用）。
+
+```bash
+xcrun notarytool store-credentials "AC_PASS" \
+  --apple-id "you@example.com" --team-id "TEAMID" \
+  --password "abcd-efgh-ijkl-mnop"        # App 专用密码，只需存一次
+
+cp release.conf.example release.conf      # 填证书名 / Team ID / profile 名
+./build.sh --release --universal          # Developer ID 签名 + Hardened Runtime
+./notarize.sh                             # 打包 → 公证 → 装订 → Gatekeeper 实测
+```
+
+### 配置与文件说明
+
+产品身份（产品名 / Bundle ID / 版本）放在 **`app.conf`**，会提交到仓库，CI 也读它；
+签名机密放在 **`release.conf`**，已被 `.gitignore` 忽略。**改名不需要动任何代码**
+（`Sources/Core.swift` 的 `Brand` 从 Info.plist 读取，UI 全部走它）。
+
+| 文件 | 用途 |
+|---|---|
+| `app.conf` | 产品名 / Bundle ID / 版本 / 版权行（可提交） |
+| `release.conf.example` | 签名与公证机密模板（不要提交） |
+| `LICENSE` / `NOTICE.md` | MIT 许可证 + 与原作关系的权利声明 |
+| `Resources/Info.plist.in` | Info.plist 模板，占位符由 `build.sh` 替换 |
+| `Resources/entitlements-developerid.plist` | Developer ID 用（不沙箱，最小权限） |
+| `Resources/entitlements-mas.plist` | Mac App Store 用（沙箱，另需代码改造） |
+| `Resources/PrivacyInfo.xcprivacy` | 隐私清单：不追踪、不收集数据 |
+| `.github/workflows/` | CI 构建校验 + 打 tag 自动发布 Release |
+| `notarize.sh` | 签名校验 → 公证 → 装订 → `spctl` 实测 |
+
+## 安装
+
+```bash
+git clone <你的仓库地址>
+cd <仓库目录>
+./build.sh                 # 只依赖 Command Line Tools，不需要装 Xcode
+open build/*.app
+```
+
+**推荐自己编译**：本地编译出来的 app 没有 quarantine 属性，**不会被 Gatekeeper 拦截**，
+不需要任何签名或公证。代价只是需要装 Command Line Tools（`xcode-select --install`）。
+
+从 Releases 下载预编译包的话，因为本项目没有做公证（公证需要 $99/年），
+macOS 15 起会拦截，需要手动放行一次：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/<App>.app
+# 或者：打开 app 被拦时 → 系统设置 › 隐私与安全性 → 仍要打开
+```
+
+首次运行还需要授予**屏幕录制**权限（系统设置 › 隐私与安全性 › 屏幕录制），
+这是 macOS 对屏幕抓取的强制要求，任何同类软件都一样。
+
+## 快速开始（开发）
+
+```bash
+./build.sh                 # 产出 build/<产品名>.app
+open build/*.app           # 启动
+```
+
+**首次运行必须授权**：系统设置 › 隐私与安全性 › **屏幕录制** → 勾选 PentoPic → **重新启动应用**。
+（macOS 不允许未授权进程读取屏幕，这是系统限制，无法绕过。）
+
+启动后屏幕右上角出现一个小小的 **Start** 悬浮窗，点击即冻结屏幕进入标注模式。
+
+---
+
+## 功能对照（原版 1.8 → 本实现）
+
+| 原版功能 | 本实现 |
+|---|---|
+| 一键冻结当前屏幕，成为画板 | ✅ ScreenCaptureKit 抓屏，覆盖窗口置顶冻结；**多显示器各自独立画布** |
+| 竖排双列工具栏，Start [F9] / Fertig [F9] | ✅ 布局逐项对齐（笔粗 → 颜色 → 工具 → 缩放 → 撤销 → 导出 → 信息） |
+| 自由画笔、橡皮擦 | ✅ 橡皮擦用 `.clear` 混合挖空标注层，露出原始画面，可撤销 |
+| 直线、箭头、双向箭头；Shift 锁定 45° | ✅ |
+| 矩形/正方形、椭圆/圆（Shift），描边与填充 | ✅ |
+| 透明（马克）与不透明颜色、多种线宽 | ✅ 4 档笔粗 ×（4 透明 + 4 不透明 + 白 + 黑），支持最多 10 个自定义附加色 |
+| 文字输入，支持多行、可编辑、可拖动 | ✅ ⌥/⇧/⌘+Enter 换行，Enter 确认，ESC 取消；确认前可拖动 |
+| 绿色对勾、红色叉号 | ✅ 矢量绘制，尺寸跟随笔粗 |
+| 区域选择：像素级坐标、Shift 正方形、可拖动、F2 精确输入 | ✅ 另支持方向键微调（Shift 加速） |
+| 放大镜 200% / 400%，尺寸跟随笔粗 | ✅ 跟随鼠标的独立浮窗，点一下切换倍率 |
+| 整体缩放视图，最高 10×，滚轮缩放，像素坐标 + 十六进制色值，Shift 点击复制色值 | ✅ Ctrl 显示十字准线；缩放时绘图工具自动禁用（与原版一致） |
+| 撤销、清空全部 | ✅ 矢量笔画栈，撤销后重放整个标注层 |
+| 新建画板：当前屏幕 / 白纸 / 黑纸 / 方格 / 点阵 / 横线 | ✅ 另加「从剪贴板粘贴」（原版 1.8 功能） |
+| 复制到剪贴板 / 打印（可选尺寸）/ 保存 PNG·JPG·BMP | ✅ |
+| 邮件发送、打开截图文件夹 | ✅ 经 `NSSharingService` 调起邮件并附带图片 |
+| 自动截图（Fertig 时，自动命名 `<日期>-<时间>-<序号>`） | ✅ 可选 PNG / JPG |
+| 设置项：光标样式、滚轮缩放、启动即进入标注、Fertig 后退出、多屏选择、文件夹、按钮尺寸、附加颜色 | ✅ 全部实现 |
+| 右键上下文菜单列出全部功能与快捷键 | ✅ |
+| 多语言（原版德/英/法/匈/意/西） | ✅ **英 / 简体中文 / 繁體中文 / 德**，自动跟随系统语言，也可在设置里手动切换 |
+
+### 相对原版的 macOS 适配
+
+- 全局热键 **F9**（Carbon `RegisterEventHotKey`），可在设置里换成 F8/F10/F7/⌥⌘P/⌃⌥P。
+- 菜单栏常驻图标（`NSStatusItem`）+ 无 Dock 图标（`LSUIElement`），符合 Mac 小工具习惯。
+- 支持标准 macOS 快捷键：⌘Z 撤销、⌘C 复制、⌘S 保存、⌘P 打印、⌘V 粘贴、⌘O 打开文件夹、⌘E 邮件。
+- 多显示器：原版只允许在**一块**屏幕上绘制；本实现**每块屏幕都是可标注画布**，
+  工具栏作用于当前鼠标所在屏。设置里的「画布屏幕」用于决定初始焦点屏。
+- 导出支持 BMP（`NSBitmapImageRep`）、打印走系统打印面板（`NSPrintOperation`）。
+
+---
+
+## 快捷键
+
+| 键 | 功能 | 键 | 功能 |
+|---|---|---|---|
+| `F9` | 开始 / 完成 | `B` | 画笔 |
+| `F2` | 精确输入选区坐标 | `E` | 橡皮擦 |
+| `⌘Z` | 撤销 | `G` | 直线 |
+| `⌘C` | 复制到剪贴板 | `P` | 箭头 |
+| `⌘S` | 保存 | `D` | 双向箭头 |
+| `⌘P` | 打印 | `R` / `⇧R` | 矩形 / 实心矩形 |
+| `⌘V` | 从剪贴板粘贴 | `O` / `⇧O` | 椭圆 / 实心椭圆 |
+| `⌘O` | 打开截图文件夹 | `T` | 文字 |
+| `⌘E` | 邮件发送 | `H` / `K` | 对勾 / 叉号 |
+| `1`–`4` | 笔粗 | `F` / `M` | 选区 / 放大镜 |
+| `+` / `−` | 缩放视图 | `ESC` | 退出标注 |
+| `←↑→↓` | 移动选区（⇧ 加速） | | |
+
+绘图时：`Shift` 锁定 45°（直线/箭头）或正方形/正圆（矩形/椭圆/选区）。
+
+---
+
+## 项目结构
+
+```
+PentoPic/
+├── build.sh                    # 一键构建 .app（仅需 Command Line Tools）
+├── preview-build.sh            # 离屏自检：把界面与绘图结果渲染成 PNG
+├── Resources/Info.plist        # LSUIElement、版本、图标
+├── Resources/AppIcon.icns      # 应用图标
+├── Sources/
+│   ├── main.swift              # 入口、菜单栏图标、主菜单
+│   ├── Core.swift              # 本地化、工具枚举、调色板、图形渲染、标注图层
+│   ├── Prefs.swift             # 全部偏好设置（UserDefaults）
+│   ├── Capture.swift           # 屏幕冻结（ScreenCaptureKit + CGDisplay 回退）
+│   ├── CanvasView.swift        # 画布状态/视图、鼠标与键盘、文字编辑、缩放视图、光标
+│   ├── Windows.swift           # 覆盖窗口、工具栏面板、放大镜、Toast、会话控制器
+│   ├── Toolbar.swift           # 竖排双列工具栏（SwiftUI）
+│   ├── Exporter.swift          # 保存/剪贴板/打印/邮件/自动截图/权限提示
+│   ├── SettingsWindow.swift    # 信息与设置窗口
+│   └── HotKey.swift            # 全局热键
+├── Tools/check-l10n.py         # 本地化完整性检查（CI 也会跑）
+├── Tools/preview/main.swift    # 离屏自检程序
+├── Tools/icon/main.swift       # 图标生成器
+├── Tools/s2t/main.swift        # 简繁转换辅助工具（一次性，不参与构建）
+└── preview/                    # 自检输出的 PNG
+```
+
+### 关键设计
+
+- **坐标系**：`AnnotationLayer` 是一张 sRGB 透明位图，CTM 统一为「左上角原点、y 轴向下、以点为单位」，
+  视图与导出共用同一套渲染代码，因此屏幕显示与保存的图片**逐像素一致**。
+- **橡皮擦**：不删除笔画，而是在标注层上用 `.clear` 混合挖空 → 天然露出原始画面；
+  重放笔画栈即可完整还原撤销后的状态。
+- **渲染顺序**：冻结底图 → 标注层位图 → 进行中的笔画 → 选区虚线框 → 坐标 HUD。
+- **窗口层级**：冻结层 `screenSaver` → 工具栏 +1 → 放大镜 +2 → 提示 +3 → 设置 +4 → 系统对话框 +5/+6。
+  弹出保存/打印/警告时会**临时挂起冻结层**，避免对话框被盖住。
+
+### 多语言
+
+界面文字全部走 `LS(德, 英, 简, 繁)` 四语参数，**简繁分别书写而非运行时转码** ——
+台湾/香港用词与大陆差异很大（设置→設定、软件→軟體、屏幕→螢幕、打印→列印、
+剪贴板→剪貼簿、鼠标→滑鼠、光标→游標、撤销→復原 …），逐字转换会得到"繁体字写大陆话"
+的别扭结果。所以繁体译文是独立维护的。
+
+语言自动判定规则（`Prefs.resolveLanguage`）：
+
+| 系统语言 | 选中 |
+|---|---|
+| `zh-Hant-*` / `zh-TW` / `zh-HK` / `zh-MO` | 繁體中文 |
+| `zh-Hans-*` / `zh-CN` / `zh-SG` | 简体中文 |
+| `de-*` | Deutsch |
+| 其它 | English |
+
+改文案时用检查工具防止漏翻译：
+
+```bash
+python3 Tools/check-l10n.py
+```
+
+它会校验：**每处 `LS()` 都有 4 个参数**（编译器也会强制）、四语都不为空、
+引号类型一致、无语言串味（德语参数里混入中文等）、插值没有被多余转义。
+CI 里已接入这一步。
+
+预览渲染可指定语言，用来肉眼核对排版：
+
+```bash
+POFIX_LANG=zh-Hant ./preview-build.sh   # 产出 preview/00-settings-zh-Hant.png 等
+```
+
+---
+
+## 自检（无需屏幕录制权限）
+
+```bash
+./preview-build.sh
+```
+
+会离屏渲染并输出到 `preview/`：
+
+| 文件 | 验证内容 |
+|---|---|
+| `00-settings-<语言>.png` | 设置窗口（文字最密集，用来核对四种语言排版） |
+| `01-toolbar-<语言>.png` | 工具栏外观，`en` / `zh-Hans` / `zh-Hant` / `de` 各一张 |
+| `02-tools.png` | 全部 15 种图形 / 文字 / 对勾 / 叉号 / 马克笔 |
+| `03-compose.png` | 合成方向正确性（左上角标记不被翻转） |
+| `04-grid-region.png` | 方格纸背景 + 选区裁剪（600×400 点 → 1200×800 px） |
+| `05-eraser.png` | 橡皮擦切断笔画并露出白底 |
+| `06-rebuild.png` | 撤销后重放笔画栈结果一致 |
+| `07/08-overlay*.png` | 真实「覆盖层 + 工具栏」会话（用合成画面代替截屏） |
+| `09-toolbar-live.png` | 标注进行中的工具栏状态 |
+
+另设开发用环境变量 `POFIX_FAKE_CAPTURE=1`：跳过权限检查并用合成画面充当"冻结的屏幕"。
+
+## 真机端到端自检
+
+```bash
+POFIX_SELFTEST="$PWD/selftest" ./build/PentoPic.app/Contents/MacOS/PentoPic
+```
+
+必须在 **PentoPic.app 自己的进程**里跑（屏幕录制权限是按应用授予的），它会：
+
+1. 真实调用 ScreenCaptureKit 冻结当前屏幕，并校验画面非纯色、逐点采样色值
+2. 通过 `NSWindow.sendEvent` 合成**真实鼠标事件**驱动画布，逐个走完全部工具
+3. 每一步把视图渲染成 PNG 证据，导出 PNG/JPG/BMP、写剪贴板、生成打印 PDF、触发自动截图
+4. 输出 `report.txt`，进程退出码 = 失败项数
+
+最近一次真机结果（1512×982 @2x，macOS 26.6）：
+
+```
+================ 结果: 45 项通过, 0 项失败 ================
+```
+
+除绘图工具外，还覆盖：滚轮缩放锚点、缩放视图内放大镜、放大镜尺寸随笔粗递增、
+像素取色器行列对应（`preview` 单元自检 5/5）、选区裁剪、PNG/JPG/BMP 编码、剪贴板、打印 PDF、自动截图。
+
+证据在 `selftest/`：
+
+| 文件 | 内容 |
+|---|---|
+| `S01-真实冻结屏幕.png` | 真实抓取的 3024×1964 屏幕 |
+| `S03` / `S04` / `S05` | 基本图形 / 文字·对勾·叉号 / 马克笔·橡皮擦 |
+| `S07-选区裁剪.png` | 选区导出（1300×470 pt → 2600×940 px） |
+| `S08-选区虚线框.png` | 选区虚线框与尺寸标签 |
+| `S09-放大镜-400%.png` | 放大镜浮窗 |
+| `S10-缩放视图与取色HUD.png` | 3× 缩放 + `X/Y/十六进制色值` HUD |
+| `S11-工具栏-活动状态.png` | 中文界面下的工具栏 |
+| `S12-导出.png/.jpg/.bmp`、`S13-打印输出.pdf` | 各导出格式实际产物 |
+
+### 关于屏幕录制权限（重要）
+
+**每次重新编译后都需要重新授权一次。** 本项目没有可用的代码签名身份
+（`security find-identity -v -p codesigning` → 0 valid identities），只能 ad-hoc 签名，
+而 ad-hoc 签名绑定 cdhash —— 二进制一改，之前的授权就作废了。
+所以这份代码定稿后**不要再重新编译**，授权一次即可长期有效。
+
+**一个容易踩的坑：权限判定随"启动方式"而变。** 同一个二进制、同一个 cdhash：
+
+| 启动方式 | `CGPreflightScreenCaptureAccess()` |
+|---|---|
+| 从 shell 直接执行 `…/Contents/MacOS/PentoPic` | `true`（继承父进程的 TCC 归属） |
+| `open build/PentoPic.app`（用户真实方式） | `false` |
+
+因此**验证权限必须用 `open` 启动**，否则会得到假阳性。仓库里为此提供了标记文件探针：
+
+```bash
+echo "$PWD/probe" > /tmp/pofix-probe     # 只探测权限
+open build/PentoPic.app; sleep 6; pkill -f PentoPic
+cat probe/probe.txt
+
+echo "selftest:$PWD/selftest" > /tmp/pofix-probe   # 用真实启动路径跑完整自检
+open build/PentoPic.app
+```
+
+**当前版本的 cdhash 是 `ad1f93c0`**（ad-hoc 签名）。授权请务必在这一版之后进行。
+
+**如果开关已经是打开状态却仍然无效**：说明那条授权记录绑定的是旧版本程序。
+在「屏幕录制」列表里选中 PentoPic，点左下角的 **「−」** 删掉这条记录，
+然后打开 PentoPic 点 Start，让系统按当前版本重新登记（也可以在 Terminal 里执行
+`tccutil reset ScreenCapture de.pointofix.mac`）。应用弹窗里也写了这段提示。
+
+应用侧的授权引导是三步：
+
+1. 先调 `CGRequestScreenCaptureAccess()` —— 它会弹出**系统标准授权框**并把本应用登记进
+   「屏幕录制」列表。（`CGPreflightScreenCaptureAccess()` 只查询、不登记；只用它的话
+   用户打开系统设置会发现列表里根本没有 PentoPic。）
+2. 若用户拒绝或系统未弹窗，再弹自定义引导框：**打开系统设置 / 重试 / 退出并重新打开 / 取消**。
+3. 「退出并重新打开」用于 macOS 已缓存判定、必须重启进程才生效的情况。
+
+### 屏幕录制授权的深链接修复
+
+macOS 13 起「系统设置」改为 ExtensionKit 架构，旧的
+`x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`
+已降级为 `legacyBundleIdentifier`。实测 macOS 26 上它**只会把「系统设置」拉到前台并停在「通用」面板**
+（进程里加载的是 `GeneralSettings.appex`），用户看到的现象就是"点不开隐私"。
+
+正确写法（A/B 冷启动实测确认落到 `SecurityPrivacyExtension.appex`）：
+
+```
+x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture
+```
+
+授权流程也一并改好：弹窗提供 **打开系统设置 / 重试 / 取消**，在系统设置里勾选后
+直接点「重试」即可继续，**不必重启应用**；若 macOS 尚未对本进程生效，会明确提示重启。
+
+### 对照官方帮助页（hilfe_en.php）做的优化
+
+| 问题 | 说明 |
+|---|---|
+| **滚轮缩放锚点算错** | 文档写明 "zoom in and out by wheel mouse **at a specific position**"，但原公式符号写反，实测光标下的源像素会漂移 **72 pt**。已修正为 `center = anchor − (p − size/2)/next`，现漂移 0.0。 |
+| **缩放视图里的死按钮** | 放大镜/选区按钮能被选中，但 `mouseDown` 在缩放态直接 return，点了没反应。现在放大镜**在缩放视图内可用**（查看工具，非绘图，原版禁用的是绘图），选区等工具选中时自动退出缩放。 |
+| **放大镜尺寸区分度不足** | 文档："Size of magnifier is **according to pencil size**"。映射从 `110+4p`（118→198）改为 `96+9p`（120→294），并支持在笔粗改变时**不移动鼠标即时刷新**。 |
+| **Ctrl 十字准线不刷新** | 缩放视图里 Ctrl 准线依赖 `NSEvent.modifierFlags`，不移动鼠标就不会重绘。补上 `flagsChanged`。 |
+| **取色性能** | 缩放 HUD 每次鼠标移动都把整张 3024×1964 图绘制进 1×1 上下文取色。改为先用惰性 `cropping(to:)` 裁出 1×1 再绘制。 |
+| **文字编辑抢快捷键** | 画布是文本编辑框的父视图，`performKeyEquivalent` 先到画布，导致编辑文字时 ⌘C/⌘V/⌘Z 失效。已加 first-responder 判断让行。 |
+| **延迟抓屏的竞态** | `start()` 后 80ms 才抓屏，若这期间按 F9 取消，异步回调仍会凭空建出会话。已加 `isActive` 复核。 |
+| **补齐原版快捷键** | 文字换行补 **Ctrl+Enter**；存档补 **F7 / F8 / ⌘U**；缩放补 **⌘+ / ⌘−**。 |
+
+### 自检发现并修复的真实缺陷
+
+1. **文字重复提交**：`TextEditBox` 提交后未清空画布的 `editBox` 引用，
+   下一次点击画布时 `commitPendingEdit()` 会把同一段文字再提交一次（笔画数 13→16）。
+2. **橡皮擦擦穿底图**：橡皮擦笔画曾被当作"进行中预览"绘制到视图上，
+   其 `.clear` 混合会把冻结底图一起清掉成透明。现已只在标注图层上生效。
+3. **文字工具图标**：SF Symbol `textformat` 会随语言渲染成本地化汉字（中文下显示"格式"），
+   已改为原版的大写 "A"。
+
+---
+
+## 已知限制
+
+- 未做代码签名 / 公证，属于本地 ad-hoc 签名版本；每次重新编译后 macOS 可能要求**重新授权屏幕录制**。
+- macOS 系统级快捷键（如 Mission Control 占用 F9）优先于应用内热键，冲突时请在设置里换一个热键。
+- 缩放视图内不提供绘图（与原版一致）。

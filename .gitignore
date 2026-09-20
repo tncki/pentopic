@@ -1,0 +1,12 @@
+# 签名/公证机密（证书名、Team ID、Apple ID）
+release.conf
+
+# 构建产物与缓存
+build/
+.cache/
+selftest/
+probe*/
+
+# ⚠️ 从 pointofix.de 下载的原站截图（受版权保护，绝对不能提交）
+ref/
+AUTHORIZATION-EMAIL.md

@@ -1,0 +1,82 @@
+name: Release
+
+# 打 tag 即自动构建并发布，例如：
+#   git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 创建 Release 需要
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取产品身份
+        id: ident
+        run: |
+          # shellcheck disable=SC1091
+          . ./app.conf
+          echo "name=$APP_NAME"     >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
+
+      - name: 构建（通用二进制）
+        run: ./build.sh --universal
+
+      - name: 打包 zip（zip 能保留 .app 的符号链接与权限）
+        run: |
+          set -e
+          APP=$(ls -d build/*.app | head -1)
+          NAME=$(basename "$APP" .app)
+          TAG="${GITHUB_REF_NAME:-v${{ steps.ident.outputs.version }}}"
+          OUT="build/${NAME}-${TAG}-universal.zip"
+          ditto -c -k --keepParent "$APP" "$OUT"
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+          ls -lh "$OUT"
+
+      - name: 生成校验和
+        run: |
+          cd build && shasum -a 256 *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME:-v${{ steps.ident.outputs.version }}}"
+          gh release create "$TAG" \
+            --title "${{ steps.ident.outputs.name }} $TAG" \
+            --generate-notes \
+            "$OUT" build/SHA256SUMS.txt
+          echo "已发布: $TAG"
+
+      # 如果你以后加入了 Apple Developer Program（$99/年），把下面这段打开就能自动公证：
+      #
+      # - name: 导入签名证书
+      #   env:
+      #     CERT_P12: ${{ secrets.MACOS_CERT_P12 }}      # base64 的 .p12
+      #     CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      #   run: |
+      #     echo "$CERT_P12" | base64 -d > cert.p12
+      #     security create-keychain -p ci ci.keychain
+      #     security import cert.p12 -k ci.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
+      #     security set-keychain-settings -lut 3600 ci.keychain
+      #     security default-keychain -s ci.keychain
+      #
+      # - name: 签名并公证
+      #   env:
+      #     APPLE_ID: ${{ secrets.APPLE_ID }}
+      #     TEAM_ID: ${{ secrets.TEAM_ID }}
+      #     APP_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+      #     SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
+      #   run: |
+      #     ./build.sh --release --universal
+      #     xcrun notarytool store-credentials CI \
+      #       --apple-id "$APPLE_ID" --team-id "$TEAM_ID" --password "$APP_PASSWORD"
+      #     ditto -c -k --keepParent build/*.app build/notarize.zip
+      #     xcrun notarytool submit build/notarize.zip --keychain-profile CI --wait
+      #     xcrun stapler staple build/*.app
+      #     spctl -a -vvv -t install build/*.app

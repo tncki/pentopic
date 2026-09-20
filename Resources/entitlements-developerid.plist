@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Developer ID 分发用的 entitlements（不沙箱）。
+
+  要点：
+  · 屏幕录制 **不需要 entitlement**。它是 TCC 隐私权限，由用户在
+    「系统设置 › 隐私与安全性 › 屏幕录制」里授权，沙箱与否都一样。
+  · 全局热键用 Carbon RegisterEventHotKey，是公开 API，不需要额外权限。
+  · 打印、剪贴板、NSSharingService 发邮件都不需要 entitlement。
+  · 因此这里保持最小集合 —— 权限越少，公证越顺，用户越放心。
+-->
+<plist version="1.0">
+<dict>
+    <!-- 不需要任何特权：留空字典即为最小权限。
+         如需在 Hardened Runtime 下加载第三方插件，才需要
+         com.apple.security.cs.disable-library-validation（本应用不需要）。 -->
+</dict>
+</plist>

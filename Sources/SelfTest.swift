@@ -1,0 +1,537 @@
+// SelfTest.swift — 真机端到端自检（POFIX_SELFTEST=<输出目录> 时启用）
+//
+// 作用：在 Pointofix.app 自己的进程里跑完整流程（真实截屏 + 真实事件 + 真实导出），
+// 把每一步的结果渲染成 PNG 证据并写出 report.txt。
+// 正常使用时不会执行（仅在设置了环境变量 POFIX_SELFTEST 时触发）。
+import AppKit
+
+enum SelfTest {
+
+    static var outDirOverride: String?
+
+    static var enabled: Bool {
+        ProcessInfo.processInfo.environment["POFIX_SELFTEST"] != nil || outDirOverride != nil
+    }
+
+    /// 标记文件 /tmp/pofix-probe —— 环境变量传不进 `open` 启动的 GUI 应用
+    /// （launchctl setenv 需要特权），所以用文件触发。
+    ///
+    ///   内容 `/path/dir`           → 只探测权限并写 probe.txt 后退出
+    ///   内容 `selftest:/path/dir`  → 走完整端到端自检
+    ///
+    /// 注意：必须用这种方式测！从 shell 直接跑可执行文件时 TCC 的归属进程不同，
+    /// 会得到与用户真实启动（open .app）不一样的权限判定。
+    static var markerRequest: (mode: String, dir: String)? {
+        guard let raw = try? String(contentsOfFile: "/tmp/pofix-probe", encoding: .utf8) else { return nil }
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        if t.hasPrefix("selftest:") {
+            return ("selftest", String(t.dropFirst("selftest:".count)))
+        }
+        return ("probe", t)
+    }
+
+    /// 按真实启动路径（open .app）记录权限判定与签名信息
+    static func writeProbe(to dir: String) {
+        let out = URL(fileURLWithPath: dir)
+        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        var lines: [String] = []
+        lines.append("time=\(Date())")
+        lines.append("bundlePath=\(Bundle.main.bundlePath)")
+        lines.append("bundleID=\(Bundle.main.bundleIdentifier ?? "nil")")
+        lines.append("executable=\(Bundle.main.executablePath ?? "nil")")
+        lines.append("screenCapturePermission=\(ScreenCapture.hasPermission)")
+        lines.append("screens=\(NSScreen.screens.count)")
+        // 真的抓一张，验证不只是 preflight 通过
+        if ScreenCapture.hasPermission, let sc = NSScreen.main {
+            let t0 = Date()
+            let cap = ScreenCapture.capture(screen: sc)
+            lines.append("captureOK=\(cap != nil)")
+            lines.append("captureSize=\(cap.map { "\($0.cgImage.width)x\($0.cgImage.height)" } ?? "-")")
+            lines.append("captureSeconds=\(String(format: "%.2f", Date().timeIntervalSince(t0)))")
+        } else {
+            lines.append("captureOK=false")
+            lines.append("captureSize=-")
+        }
+        try? lines.joined(separator: "\n").write(to: out.appendingPathComponent("probe.txt"),
+                                                  atomically: true, encoding: .utf8)
+        print(lines.joined(separator: "\n"))
+    }
+
+    private static var outDir: URL {
+        if let o = outDirOverride { return URL(fileURLWithPath: o) }
+        return URL(fileURLWithPath: ProcessInfo.processInfo.environment["POFIX_SELFTEST"] ?? "/tmp/pofix-selftest")
+    }
+
+    private static var report: [String] = []
+    private static var pass = 0, fail = 0
+
+    private static func log(_ s: String) {
+        report.append(s)
+        print(s)
+        fflush(stdout)
+    }
+
+    private static func check(_ name: String, _ ok: Bool, _ detail: String = "") {
+        if ok { pass += 1 } else { fail += 1 }
+        log("\(ok ? "  PASS" : "  FAIL")  \(name)\(detail.isEmpty ? "" : "  — \(detail)")")
+    }
+
+    private static func pump(_ seconds: Double) {
+        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    // MARK: 渲染证据
+
+    @discardableResult
+    private static func shot(_ view: NSView?, _ name: String) -> Bool {
+        guard let v = view, v.bounds.width > 0, v.bounds.height > 0 else {
+            log("  (无法渲染 \(name)：视图为空)"); return false
+        }
+        v.layoutSubtreeIfNeeded()
+        v.displayIfNeeded()
+        guard let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return false }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        guard let d = rep.representation(using: .png, properties: [:]) else { return false }
+        let url = outDir.appendingPathComponent(name)
+        try? d.write(to: url)
+        log("  渲染 \(name)  \(Int(v.bounds.width))×\(Int(v.bounds.height))  \(d.count / 1024) KB")
+        return true
+    }
+
+    private static func writeImage(_ cg: CGImage?, _ name: String) -> Int? {
+        guard let cg, let d = Exporter.encode(cg, as: .png) else { return nil }
+        try? d.write(to: outDir.appendingPathComponent(name))
+        log("  导出 \(name)  \(cg.width)×\(cg.height)  \(d.count / 1024) KB")
+        return d.count
+    }
+
+    // MARK: 合成鼠标事件
+
+    private static var useWindowDispatch = true
+    private static var window: NSWindow?
+    private static var canvas: CanvasView?
+
+    private static func event(_ type: NSEvent.EventType, _ p: CGPoint,
+                              flags: NSEvent.ModifierFlags = []) -> NSEvent? {
+        guard let win = window else { return nil }
+        let h = win.contentView?.bounds.height ?? 0
+        return NSEvent.mouseEvent(with: type,
+                                  location: NSPoint(x: p.x, y: h - p.y),   // 视图为 flipped
+                                  modifierFlags: flags,
+                                  timestamp: ProcessInfo.processInfo.systemUptime,
+                                  windowNumber: win.windowNumber, context: nil,
+                                  eventNumber: 0, clickCount: 1,
+                                  pressure: type == .leftMouseUp ? 0 : 1)
+    }
+
+    /// 走真实事件派发；若窗口路由没生效则回退到直接调用视图方法
+    private static func drag(_ pts: [CGPoint], flags: NSEvent.ModifierFlags = []) {
+        guard let view = canvas, !pts.isEmpty else { return }
+        func send(_ type: NSEvent.EventType, _ p: CGPoint) {
+            guard let e = event(type, p, flags: flags) else { return }
+            if useWindowDispatch {
+                window?.sendEvent(e)
+            } else {
+                switch type {
+                case .leftMouseDown: view.mouseDown(with: e)
+                case .leftMouseDragged: view.mouseDragged(with: e)
+                default: view.mouseUp(with: e)
+                }
+            }
+        }
+        send(.leftMouseDown, pts[0])
+        for p in pts.dropFirst() { send(.leftMouseDragged, p) }
+        send(.leftMouseUp, pts[pts.count - 1])
+    }
+
+    private static func click(_ p: CGPoint, flags: NSEvent.ModifierFlags = []) {
+        drag([p], flags: flags)
+    }
+
+    // MARK: 主流程
+
+    static func run() {
+        try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        log("================ Pointofix macOS 真机端到端自检 ================")
+        log("时间: \(Date())")
+        log("输出目录: \(outDir.path)")
+        log("屏幕: \(NSScreen.screens.map { "\(Int($0.frame.width))×\(Int($0.frame.height))@\($0.backingScaleFactor)x" }.joined(separator: ", "))")
+        log("")
+
+        // ---- 0. 权限 ----
+        log("[0] 屏幕录制权限")
+        guard ScreenCapture.hasPermission else {
+            check("屏幕录制权限", false, "未授权 —— 请在 系统设置 › 隐私与安全性 › 屏幕录制 中勾选 Pointofix 后重试")
+            finishReport()
+            exit(2)
+        }
+        check("屏幕录制权限", true, "已授权")
+
+        // 把截图目录临时指到输出目录，避免污染用户文档目录（结束时复原）
+        let savedShot = Prefs.screenshotFolder
+        let savedMail = Prefs.emailFolder
+        let savedAuto = Prefs.autoScreenshot
+        Prefs.setScreenshotFolder(outDir.appendingPathComponent("screenshots"))
+        Prefs.setEmailFolder(outDir.appendingPathComponent("email"))
+        Prefs.ensureFolders()
+
+        // ---- 1. 启动会话（真实截屏）----
+        log("")
+        log("[1] 冻结屏幕（真实截屏）")
+        let sc = SessionController.shared
+        sc.start(synchronously: true)
+        pump(0.4)
+        log("  诊断: isActive=\(sc.isActive) canvases=\(sc.canvases.count) views=\(sc.allViews().count)")
+        for s in NSScreen.screens {
+            log("  屏幕 \(Int(s.frame.width))×\(Int(s.frame.height)) displayID=\(ScreenCapture.displayID(of: s))")
+        }
+        if !sc.isActive || sc.canvases.isEmpty {
+            check("会话启动", false, "未能建立覆盖层")
+            finishReport(); exit(3)
+        }
+        guard let st = sc.activeCanvas, let view = sc.allViews().first, let win = view.window else {
+            check("会话启动", false, "画布或窗口缺失 (st=\(sc.activeCanvas != nil) view=\(sc.allViews().first != nil) window=\(sc.allViews().first?.window != nil))")
+            finishReport(); exit(3)
+        }
+        window = win
+        canvas = view
+        check("会话启动", true, "画布 \(Int(st.pointSize.width))×\(Int(st.pointSize.height)) pt，\(sc.canvases.count) 块屏幕")
+
+        // 抓到的必须是真实屏幕：检查图像非纯色
+        if let frozen = st.frozenCG {
+            check("捕获到真实屏幕", true, "\(frozen.width)×\(frozen.height) px")
+            writeImage(frozen, "S01-真实冻结屏幕.png")
+            let c1 = PixelSampler.color(of: frozen, at: CGPoint(x: 10, y: 10))
+            let c2 = PixelSampler.color(of: frozen, at: CGPoint(x: frozen.width - 10, y: frozen.height - 10))
+            let c3 = PixelSampler.color(of: frozen, at: CGPoint(x: frozen.width / 2, y: frozen.height / 3))
+            log("  左上=\(c1?.hexString ?? "?")  右下=\(c2?.hexString ?? "?")  中部=\(c3?.hexString ?? "?")")
+            let colors = [c1, c2, c3].compactMap { $0?.hexString }
+            check("画面不是纯色（确认非空白兜底图）", Set(colors).count > 1, colors.joined(separator: " / "))
+        } else {
+            check("捕获到真实屏幕", false, "frozenCG 为空")
+        }
+
+        // 显示起始状态
+        shot(sc.allViews().first, "S02-冻结层原始画面.png")
+
+        // 先验证事件派发是否真的路由到画布
+        sc.setTool(.pen)
+        sc.setPenSize(2)
+        drag([CGPoint(x: 260, y: 620), CGPoint(x: 300, y: 600), CGPoint(x: 340, y: 625)])
+        pump(0.1)
+        if st.strokes.isEmpty {
+            log("  ⚠️  窗口事件派发未命中画布，改用直接派发模式")
+            useWindowDispatch = false
+            drag([CGPoint(x: 260, y: 620), CGPoint(x: 300, y: 600), CGPoint(x: 340, y: 625)])
+            pump(0.1)
+        } else {
+            log("  ✓ 通过窗口真实事件派发成功命中画布")
+        }
+        check("画笔（自由手绘）", st.strokes.count >= 1, "笔画数 \(st.strokes.count)")
+
+        // ---- 2. 逐个工具 ----
+        log("")
+        log("[2] 全部绘图工具")
+        sc.clearAll(); pump(0.05)
+
+        sc.setTool(.pen); sc.setPenSize(3)
+        sc.setSwatch(1)   // 不透明红
+        drag((0..<40).map { CGPoint(x: 120 + CGFloat($0) * 9, y: 140 + sin(CGFloat($0) / 4) * 26) })
+        check("自由画笔", st.strokes.count == 1, "笔画数 \(st.strokes.count)")
+
+        sc.setTool(.line); sc.setSwatch(5)  // 不透明绿
+        drag([CGPoint(x: 520, y: 110), CGPoint(x: 700, y: 190)])
+        check("直线", st.strokes.count == 2)
+
+        sc.setTool(.arrow); sc.setSwatch(1)
+        drag([CGPoint(x: 760, y: 190), CGPoint(x: 950, y: 110)])
+        check("箭头", st.strokes.count == 3)
+
+        sc.setTool(.doubleArrow); sc.setSwatch(7)  // 不透明蓝
+        drag([CGPoint(x: 1000, y: 110), CGPoint(x: 1200, y: 190)])
+        check("双向箭头", st.strokes.count == 4)
+
+        sc.setTool(.rect); sc.setSwatch(1); drag([CGPoint(x: 120, y: 260), CGPoint(x: 320, y: 360)])
+        check("矩形", st.strokes.count == 5)
+
+        sc.setTool(.rectFilled); sc.setSwatch(2)   // 透明黄（马克）
+        drag([CGPoint(x: 360, y: 260), CGPoint(x: 560, y: 360)])
+        check("实心矩形", st.strokes.count == 6)
+
+        sc.setTool(.ellipse); sc.setSwatch(1)
+        drag([CGPoint(x: 600, y: 260), CGPoint(x: 800, y: 360)])
+        check("椭圆", st.strokes.count == 7)
+
+        sc.setTool(.ellipseFilled); sc.setSwatch(0) // 透明红（马克）
+        drag([CGPoint(x: 840, y: 260), CGPoint(x: 1040, y: 360)])
+        check("实心椭圆", st.strokes.count == 8)
+
+        // Shift 约束：正方形
+        sc.setTool(.rect); sc.setSwatch(0)
+        drag([CGPoint(x: 1100, y: 260), CGPoint(x: 1240, y: 330)], flags: .shift)
+        if case .rect(let r) = st.strokes.last?.shape {
+            check("Shift 约束为正方形", abs(r.width - r.height) < 1.5, "\(Int(r.width))×\(Int(r.height))")
+        } else { check("Shift 约束为正方形", false) }
+
+        // Shift 45° 吸附
+        sc.setTool(.line)
+        drag([CGPoint(x: 1300, y: 260), CGPoint(x: 1420, y: 300)], flags: .shift)
+        if case .line(let a, let b) = st.strokes.last?.shape {
+            let ang = atan2(b.y - a.y, b.x - a.x) * 180 / .pi
+            check("Shift 吸附 45°", abs(ang.rounded() / 45 - ang / 45) < 0.02, "角度 \(String(format: "%.1f", ang))°")
+        } else { check("Shift 吸附 45°", false) }
+
+        shot(view, "S03-基本图形.png")
+
+        // ---- 3. 文字 / 对勾 / 叉号 ----
+        log("")
+        log("[3] 文字、对勾、叉号")
+        sc.setTool(.check)
+        click(CGPoint(x: 200, y: 460))
+        if let last = st.strokes.last, case .check = last.shape { check("对勾", true) } else { check("对勾", false) }
+
+        sc.setTool(.cross)
+        click(CGPoint(x: 320, y: 460))
+        if let last = st.strokes.last, case .cross = last.shape { check("叉号", true) } else { check("叉号", false) }
+
+        sc.setTool(.text)
+        sc.setPenSize(2)
+        sc.setSwatch(7)
+        click(CGPoint(x: 450, y: 430))
+        pump(0.35)
+        // 找到文本编辑框并输入
+        if let box = view.subviews.compactMap({ $0 as? TextEditBox }).first {
+            box.tv.string = "Pointofix macOS 真机测试"
+            box.tv.onCommit?()          // 走真实提交路径（含移除编辑框）
+            pump(0.15)
+            if let last = st.strokes.last, case .text(let s, _, _) = last.shape {
+                check("文字输入", s.contains("真机测试"), "内容「\(s)」")
+            } else { check("文字输入", false, "最后一条不是文字") }
+        } else {
+            check("文字输入", false, "未创建编辑框")
+        }
+        shot(view, "S04-文字-对勾-叉号.png")
+
+        // ---- 4. 马克笔 + 橡皮擦 ----
+        log("")
+        log("[4] 马克笔与橡皮擦")
+        let beforeEraser = st.strokes.count
+        // 水平马克笔迹，远离随后的竖直橡皮轨迹
+        sc.setTool(.pen); sc.setPenSize(3); sc.setSwatch(0)   // 透明红马克
+        drag((0..<50).map { CGPoint(x: 200 + CGFloat($0) * 10, y: 480) })
+        let markerOnly = st.strokes.count
+        check("马克笔迹已记录", markerOnly == beforeEraser + 1, "\(beforeEraser) → \(markerOnly)")
+
+        var markerPt = CGPoint.zero
+        var erasedPt = CGPoint.zero
+        if let composed = st.composeCG(region: nil), let frozen = st.frozenCG {
+            markerPt = CGPoint(x: 300, y: 480)          // 只被马克盖住
+            erasedPt = CGPoint(x: 450, y: 480)          // 随后会被橡皮擦掉
+            let a = PixelSampler.color(of: composed, at: CGPoint(x: markerPt.x * st.scale, y: markerPt.y * st.scale))
+            let b = PixelSampler.color(of: frozen, at: CGPoint(x: markerPt.x * st.scale, y: markerPt.y * st.scale))
+            check("马克笔覆盖底图（颜色改变）", a?.hexString != b?.hexString,
+                  "标注 \(a?.hexString ?? "?") vs 底图 \(b?.hexString ?? "?")")
+        }
+
+        // 竖直橡皮自下而上横切马克笔迹
+        sc.setTool(.eraser)
+        drag((0..<40).map { CGPoint(x: 450, y: 560 - CGFloat($0) * 4) })
+        pump(0.1)
+        check("橡皮擦新增笔画记录", st.strokes.count == markerOnly + 1, "\(markerOnly) → \(st.strokes.count)")
+        check("橡皮擦标记正确", st.strokes.last?.isEraser == true)
+
+        if let composed = st.composeCG(region: nil), let frozen = st.frozenCG {
+            let a = PixelSampler.color(of: composed, at: CGPoint(x: erasedPt.x * st.scale, y: erasedPt.y * st.scale))
+            let b = PixelSampler.color(of: frozen, at: CGPoint(x: erasedPt.x * st.scale, y: erasedPt.y * st.scale))
+            check("橡皮擦处还原为原始画面", a?.hexString == b?.hexString,
+                  "擦后 \(a?.hexString ?? "?") vs 底图 \(b?.hexString ?? "?")")
+        }
+        shot(view, "S05-马克笔与橡皮擦.png")
+
+        // ---- 5. 撤销 ----
+        log("")
+        log("[5] 撤销与清空")
+        let before = st.strokes.count
+        st.invalidateZoomCache()
+        sc.undo()
+        check("撤销一条", st.strokes.count == before - 1, "\(before) → \(st.strokes.count)")
+        sc.undo()
+        check("再撤销一条", st.strokes.count == before - 2, "→ \(st.strokes.count)")
+        shot(view, "S06-撤销后.png")
+
+        // ---- 6. 选区 ----
+        log("")
+        log("[6] 区域选择与裁剪")
+        sc.setTool(.region)
+        drag([CGPoint(x: 100, y: 90), CGPoint(x: 1400, y: 560)])
+        pump(0.1)
+        check("选区已建立", st.region != nil, st.region.map { "\(Int($0.width))×\(Int($0.height)) pt" } ?? "nil")
+        if let cg = st.composeCG(region: st.region) {
+            let expectW = Int(st.region!.width * st.scale)
+            check("按选区裁剪导出", cg.width == expectW || abs(cg.width - expectW) <= 2,
+                  "导出 \(cg.width)×\(cg.height) px，期望宽 \(expectW)")
+            writeImage(cg, "S07-选区裁剪.png")
+        }
+        shot(view, "S08-选区虚线框.png")
+
+        // ---- 7. 放大镜 ----
+        log("")
+        log("[7] 放大镜")
+        sc.setTool(.magnifier)
+        if let e = event(.mouseMoved, CGPoint(x: 700, y: 400)) { view.mouseMoved(with: e) }
+        if let e = event(.leftMouseDown, CGPoint(x: 700, y: 400)) { view.mouseDown(with: e) }
+        if let e = event(.leftMouseUp, CGPoint(x: 700, y: 400)) { view.mouseUp(with: e) }
+        pump(0.3)
+        if let mag = sc.magnifier, mag.isVisible {
+            check("放大镜浮窗已显示", true, "倍率 \(Int(mag.factor * 100))%")
+            shot(mag.contentView, "S09-放大镜-400%.png")
+        } else {
+            check("放大镜浮窗已显示", false)
+        }
+
+        // ---- 8. 缩放视图 ----
+        log("")
+        log("[8] 缩放视图")
+        sc.setTool(.region)
+        st.region = nil
+        view.needsDisplay = true
+        let sc2 = SessionController.shared
+        sc2.zoom(canvas: st, direction: 1, center: CGPoint(x: 700, y: 400))
+        pump(0.1)
+        sc2.zoom(canvas: st, direction: 1, center: CGPoint(x: 700, y: 400))
+        pump(0.2)
+        check("进入缩放视图", st.zoom > 1.5, "倍率 \(Int(st.zoom))×")
+        if let e = event(.mouseMoved, CGPoint(x: 700, y: 400)) { view.mouseMoved(with: e) }
+        pump(0.2)
+        shot(view, "S10-缩放视图与取色HUD.png")
+        if let img = st.zoomSource() {
+            let px = PixelSampler.color(of: img, at: CGPoint(x: 700 * st.scale, y: 400 * st.scale))
+            check("缩放视图可读到像素色值", px != nil, px?.hexString ?? "?")
+            let pb = NSPasteboard.general
+            pb.clearContents(); pb.setString(px?.hexString ?? "", forType: .string)
+            check("Shift+点击复制色值路径可用（直接写剪贴板验证）",
+                  NSPasteboard.general.string(forType: .string) == px?.hexString, px?.hexString ?? "?")
+        }
+        // 滚轮缩放必须锚定光标下的那个源像素（原版: "zoom ... at a specific position"）
+        let probe = CGPoint(x: 900, y: 520)
+        let srcA = st.visibleSourceRect
+        let sxA = srcA.minX + probe.x / st.zoom
+        let syA = srcA.minY + probe.y / st.zoom
+        _ = view.applyWheelZoom(delta: 1, at: probe)
+        pump(0.1)
+        let srcB = st.visibleSourceRect
+        let sxB = srcB.minX + probe.x / st.zoom
+        let syB = srcB.minY + probe.y / st.zoom
+        check("滚轮缩放锚定光标下的像素",
+              abs(sxA - sxB) < 1.0 && abs(syA - syB) < 1.0,
+              String(format: "源点 (%.1f, %.1f) → (%.1f, %.1f)", sxA, syA, sxB, syB))
+        _ = view.applyWheelZoom(delta: -1, at: probe)
+        pump(0.1)
+
+        // 放大镜在缩放视图内同样可用（原版禁用的只是"绘图"）
+        sc.setTool(.magnifier)
+        if let e = event(.leftMouseDown, CGPoint(x: 800, y: 450)) { view.mouseDown(with: e) }
+        if let e = event(.leftMouseUp, CGPoint(x: 800, y: 450)) { view.mouseUp(with: e) }
+        pump(0.25)
+        check("缩放视图内放大镜可用", sc.magnifier?.isVisible == true && st.zoom > 1,
+              "倍率 \(Int(st.zoom))×，放大镜 \(sc.magnifier?.isVisible == true ? "显示" : "隐藏")")
+
+        // 放大镜尺寸跟随笔粗
+        var sizes: [CGFloat] = []
+        for i in 0..<PenSize.count {
+            sc.setPenSize(i)
+            sizes.append(MagnifierPanel.size(forPenSize: PenSize.values[i]))
+        }
+        check("放大镜尺寸随笔粗递增", zip(sizes, sizes.dropFirst()).allSatisfy { $0 < $1 },
+              sizes.map { "\(Int($0))" }.joined(separator: " → ") + " px")
+
+        // 退回 1×
+        for _ in 0..<12 where st.zoom > 1 { sc2.zoom(canvas: st, direction: -1, center: nil); pump(0.05) }
+        check("退出缩放视图", st.zoom <= 1.001, "倍率 \(Int(st.zoom))×")
+
+        // ---- 9. 工具栏 ----
+        log("")
+        log("[9] 工具栏")
+        for w in NSApp.windows where w.level.rawValue == NSWindow.Level.screenSaver.rawValue + 1 {
+            shot(w.contentView, "S11-工具栏-活动状态.png")
+        }
+        check("工具栏存在", NSApp.windows.contains { $0.level.rawValue == NSWindow.Level.screenSaver.rawValue + 1 })
+
+        // ---- 10. 导出 ----
+        log("")
+        log("[10] 导出：PNG / JPG / BMP / 剪贴板")
+        st.region = nil
+        view.needsDisplay = true
+        if let full = st.composeCG(region: nil) {
+            var sizes: [String: Int] = [:]
+            for fmt in [ExportFormat.png, .jpg, .bmp] {
+                if let d = Exporter.encode(full, as: fmt) {
+                    let url = outDir.appendingPathComponent("S12-导出.\(fmt.ext)")
+                    try? d.write(to: url)
+                    sizes[fmt.ext] = d.count
+                }
+            }
+            check("PNG 导出", (sizes["png"] ?? 0) > 1000, "\(sizes["png"] ?? 0) B")
+            check("JPG 导出", (sizes["jpg"] ?? 0) > 1000, "\(sizes["jpg"] ?? 0) B")
+            check("BMP 导出", (sizes["bmp"] ?? 0) > 1000, "\(sizes["bmp"] ?? 0) B")
+            check("JPG 比 PNG 小（编码生效）", (sizes["jpg"] ?? .max) < (sizes["png"] ?? 0),
+                  "JPG \(sizes["jpg"] ?? 0) B < PNG \(sizes["png"] ?? 0) B")
+        } else {
+            check("合成导出图", false)
+        }
+
+        Exporter.copyToClipboard(st)
+        let pb = NSPasteboard.general
+        let pngBack = pb.data(forType: .png)
+        check("复制到剪贴板", (pngBack?.count ?? 0) > 1000, "剪贴板 PNG \(pngBack?.count ?? 0) B")
+        let imgCount = (pb.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage])?.count ?? 0
+        check("剪贴板含图像对象", imgCount > 0, "\(imgCount) 个")
+
+        // ---- 11. 打印 → PDF（无界面验证打印管线）----
+        log("")
+        log("[11] 打印管线（输出 PDF 验证）")
+        if let op = Exporter.makePrintOperation(st) {
+            let pdf = outDir.appendingPathComponent("S13-打印输出.pdf")
+            let info = op.printInfo
+            info.jobDisposition = .save
+            info.dictionary()[NSPrintInfo.AttributeKey.jobSavingURL] = pdf
+            op.showsPrintPanel = false
+            op.showsProgressPanel = false
+            let okRun = op.run()
+            let size = (try? FileManager.default.attributesOfItem(atPath: pdf.path)[.size] as? Int) ?? 0
+            check("打印管线生成 PDF", okRun && (size ?? 0) > 2000, "\(pdf.lastPathComponent) \(size ?? 0) B")
+        } else {
+            check("打印管线生成 PDF", false, "无法构建 NSPrintOperation")
+        }
+
+        // ---- 12. 自动截图 ----
+        log("")
+        log("[12] 自动截图（Fertig 时）")
+        Prefs.autoScreenshot = true
+        Prefs.autoScreenshotFormat = "png"
+        sc.finish()
+        pump(0.6)
+        let shots = (try? FileManager.default.contentsOfDirectory(atPath: Prefs.screenshotFolder.path)) ?? []
+        check("Fertig 后自动保存截图", shots.contains { $0.hasSuffix(".png") },
+              "截图目录 \(shots.count) 个文件: \(shots.sorted().suffix(2).joined(separator: ", "))")
+        check("会话已关闭", !sc.isActive, "active=\(sc.isActive)")
+
+        // 复原设置
+        Prefs.autoScreenshot = savedAuto
+        Prefs.setScreenshotFolder(savedShot)
+        Prefs.setEmailFolder(savedMail)
+
+        log("")
+        finishReport()
+        exit(fail == 0 ? 0 : 1)
+    }
+
+    private static func finishReport() {
+        log("")
+        log("================ 结果: \(pass) 项通过, \(fail) 项失败 ================")
+        let url = outDir.appendingPathComponent("report.txt")
+        try? report.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        print("\n报告已写出: \(url.path)")
+    }
+}

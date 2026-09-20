@@ -1,0 +1,22 @@
+# ============================================================================
+#  签名与公证配置（**不要提交**，已被 .gitignore 忽略）
+#
+#    cp release.conf.example release.conf
+#
+#  只在你想做 Developer ID 签名 + 公证时才需要。纯粹在 GitHub 上发源码/未签名包
+#  的话，这个文件可以不存在。
+# ============================================================================
+
+# security find-identity -v -p codesigning  查到的确切名称
+SIGN_IDENTITY="Developer ID Application: Your Name (ABCDE12345)"
+
+# developer.apple.com › Membership 里的 Team ID
+TEAM_ID="ABCDE12345"
+
+# 公证凭据 profile 名。先一次性存进钥匙串：
+#   xcrun notarytool store-credentials "AC_PASS" \
+#     --apple-id "you@example.com" --team-id "ABCDE12345" \
+#     --password "abcd-efgh-ijkl-mnop"
+NOTARY_PROFILE="AC_PASS"
+
+APPLE_ID="you@example.com"

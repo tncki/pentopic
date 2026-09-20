@@ -47,6 +47,16 @@ if [ -f "$ROOT/release.conf" ]; then
   echo "==> 签名配置: release.conf"
 fi
 
+# ---- 本地开发签名身份 ------------------------------------------------------
+# 自签名证书让 TCC 的「指定要求」变成 identifier + 证书指纹，**不再包含 cdhash**，
+# 所以重新编译不会让屏幕录制授权失效（ad-hoc 签名会，每改一次代码就要重新授权）。
+# 注意用不带 -v 的 find-identity：自签名证书通常是未受信任状态，-v 会把它过滤掉。
+DEV_IDENTITY="${DEV_IDENTITY:-PentoPic Dev}"
+HAS_DEV_IDENTITY=0
+if security find-identity -p codesigning 2>/dev/null | grep -qF "\"$DEV_IDENTITY\""; then
+  HAS_DEV_IDENTITY=1
+fi
+
 MODE="debug"
 UNIVERSAL=0
 for arg in "$@"; do
@@ -124,8 +134,22 @@ ENTITLEMENTS=""
 [ "$MODE" = "mas" ]     && ENTITLEMENTS="$ROOT/Resources/entitlements-mas.plist"
 
 if [ "$MODE" = "debug" ]; then
-  echo "==> 签名: ad-hoc（开发用；每次重编译后系统权限需要重新授权）"
-  codesign --force --deep --sign - "$APP" 2>/dev/null || echo "   (codesign 跳过)"
+  if [ "$HAS_DEV_IDENTITY" = 1 ]; then
+    echo "==> 签名: $DEV_IDENTITY（自签名 —— 重编译不会使屏幕录制授权失效）"
+    # 注意：**不要用 --deep** —— 对未受信任的自签名证书会报 errSecInternalComponent。
+    # 本 bundle 里没有嵌套代码，本来也不需要 --deep。
+    if ! codesign --force --sign "$DEV_IDENTITY" "$APP"; then
+      echo
+      echo "!! 签名失败。若报 errSecInternalComponent，通常是登录钥匙串被锁住了："
+      echo "   打开「钥匙串访问」解锁后再重试。"
+      exit 4
+    fi
+    echo "    指定要求: $(codesign -d -r- "$APP" 2>&1 | grep -o 'designated.*')"
+  else
+    echo "==> 签名: ad-hoc（未找到证书 \"$DEV_IDENTITY\"）"
+    echo "    ⚠️  重编译后系统会要求重新授权屏幕录制；详见 README「关于屏幕录制权限」"
+    codesign --force --sign - "$APP" 2>/dev/null || echo "   (codesign 跳过)"
+  fi
 elif [ -z "$SIGN_IDENTITY" ]; then
   echo "!! $MODE 构建需要签名身份，但 release.conf 里 SIGN_IDENTITY 为空"
   echo "   先在 developer.apple.com 创建证书，再用下面命令确认名称："
@@ -134,12 +158,17 @@ elif [ -z "$SIGN_IDENTITY" ]; then
 else
   echo "==> 签名: $SIGN_IDENTITY"
   echo "    Hardened Runtime + entitlements: $ENTITLEMENTS"
-  codesign --force --deep --options runtime --timestamp \
+  codesign --force --options runtime --timestamp \
            --entitlements "$ENTITLEMENTS" \
            --sign "$SIGN_IDENTITY" "$APP"
   echo "==> 校验签名"
   codesign --verify --deep --strict --verbose=2 "$APP"
   codesign -dvv "$APP" 2>&1 | grep -E "^Identifier|^TeamIdentifier|^Authority|flags=" || true
+fi
+
+# ---- 校验（之前签名失败是静默的，这里务必确认）--------------------------------
+if ! codesign --verify --strict "$APP" 2>/dev/null; then
+  echo "!! 签名校验未通过："; codesign --verify --strict --verbose=2 "$APP"; exit 5
 fi
 
 echo "==> 完成: $APP"

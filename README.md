@@ -310,19 +310,56 @@ POFIX_SELFTEST="$PWD/selftest" ./build/PentoPic.app/Contents/MacOS/PentoPic
 | `S11-工具栏-活动状态.png` | 中文界面下的工具栏 |
 | `S12-导出.png/.jpg/.bmp`、`S13-打印输出.pdf` | 各导出格式实际产物 |
 
-### 关于屏幕录制权限（重要）
+### 关于屏幕录制权限
 
-**每次重新编译后都需要重新授权一次。** 本项目没有可用的代码签名身份
-（`security find-identity -v -p codesigning` → 0 valid identities），只能 ad-hoc 签名，
-而 ad-hoc 签名绑定 cdhash —— 二进制一改，之前的授权就作废了。
-所以这份代码定稿后**不要再重新编译**，授权一次即可长期有效。
+**已经用自签名证书解决了"重编译就要重新授权"的问题。**
 
-**一个容易踩的坑：权限判定随"启动方式"而变。** 同一个二进制、同一个 cdhash：
+ad-hoc 签名会把 TCC 授权绑定到二进制的 cdhash 上，代码一改指纹就变，之前的授权立即失效 ——
+开发期间每改一行都要重新授权一次，非常折磨。改用**自签名代码签名证书**后，
+TCC 记录的「指定要求」变成：
+
+```
+identifier "io.github.tncki.pentopic" and certificate leaf = H"a43cd706..."
+```
+
+**里面不含 cdhash**，所以重新编译（哪怕架构不同、二进制完全变了）授权都保持有效。实测：
+
+| 构建 | CDHash | 指定要求 |
+|---|---|---|
+| 原生 arm64 | `ed283cbd…` | 同一个 ✅ |
+| 通用二进制 | `fbc46df5…` | 同一个 ✅ |
+
+#### 一次性创建证书（本机开发用）
+
+钥匙串访问 → 菜单「钥匙串访问 › 证书助理 › 创建证书」：
+
+- 名称：`PentoPic Dev`
+- 身份类型：**自签名根证书**
+- 证书类型：**代码签名**
+- 勾选「让我覆盖默认值」，有效期天数填 `3650`
+
+创建后**无需手动设置信任**：`codesign` 用未受信任的自签名证书也能正常签名
+（`security find-identity -v` 会因为信任问题过滤掉它，所以 `build.sh` 用不带 `-v` 的查询）。
+若想让它出现在「有效身份」列表里，可在钥匙串里把该项的「信任 › 使用此证书时」设为「始终信任」。
+
+`build.sh` 会自动探测这张证书：找到就用，找不到就回退到 ad-hoc 并给出提示。
+证书名可用环境变量覆盖：`DEV_IDENTITY="其它名称" ./build.sh`。
+
+#### 一个坑：不要用 `--deep`
+
+对本项目的 bundle（内部没有嵌套代码）用 `codesign --deep` 配未受信任的自签名证书会报
+`errSecInternalComponent` 且**静默失败**，留下链接器自动打的 ad-hoc 签名。
+`build.sh` 已去掉 `--deep`，并在签名后追加 `codesign --verify --strict` 兜底，
+避免再次出现"看起来很成功、实际没签上"的情况。
+
+### 一个容易踩的坑：权限判定随"启动方式"而变
+
+同一个二进制、同一个 cdhash：
 
 | 启动方式 | `CGPreflightScreenCaptureAccess()` |
 |---|---|
 | 从 shell 直接执行 `…/Contents/MacOS/PentoPic` | `true`（继承父进程的 TCC 归属） |
-| `open build/PentoPic.app`（用户真实方式） | `false` |
+| `open build/PentoPic.app`（用户真实方式） | 视授权状态而定 |
 
 因此**验证权限必须用 `open` 启动**，否则会得到假阳性。仓库里为此提供了标记文件探针：
 
@@ -334,21 +371,6 @@ cat probe/probe.txt
 echo "selftest:$PWD/selftest" > /tmp/pofix-probe   # 用真实启动路径跑完整自检
 open build/PentoPic.app
 ```
-
-**当前版本的 cdhash 是 `ad1f93c0`**（ad-hoc 签名）。授权请务必在这一版之后进行。
-
-**如果开关已经是打开状态却仍然无效**：说明那条授权记录绑定的是旧版本程序。
-在「屏幕录制」列表里选中 PentoPic，点左下角的 **「−」** 删掉这条记录，
-然后打开 PentoPic 点 Start，让系统按当前版本重新登记（也可以在 Terminal 里执行
-`tccutil reset ScreenCapture de.pointofix.mac`）。应用弹窗里也写了这段提示。
-
-应用侧的授权引导是三步：
-
-1. 先调 `CGRequestScreenCaptureAccess()` —— 它会弹出**系统标准授权框**并把本应用登记进
-   「屏幕录制」列表。（`CGPreflightScreenCaptureAccess()` 只查询、不登记；只用它的话
-   用户打开系统设置会发现列表里根本没有 PentoPic。）
-2. 若用户拒绝或系统未弹窗，再弹自定义引导框：**打开系统设置 / 重试 / 退出并重新打开 / 取消**。
-3. 「退出并重新打开」用于 macOS 已缓存判定、必须重启进程才生效的情况。
 
 ### 屏幕录制授权的深链接修复
 

@@ -22,6 +22,10 @@ enum ScreenCapture {
         return CGPreflightScreenCaptureAccess()
     }
 
+    /// ⚠️ 授权引导里**故意不调用**这个方法。
+    /// 它在 macOS 15+ 上是非阻塞的：弹出系统自带的授权框后立刻返回 false，
+    /// 结果系统弹窗和自定义引导弹窗会同时出现（用户看到两个框）。
+    /// 保留它仅供将来需要"强制让系统登记本应用"的场景使用。
     @discardableResult
     static func requestPermission() -> Bool { CGRequestScreenCaptureAccess() }
 

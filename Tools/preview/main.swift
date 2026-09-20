@@ -118,6 +118,33 @@ do {
     print("")
 }
 
+// ---------------------------------------------------------------- 1d. 验证模态 run loop 里的轮询定时器
+// 授权引导靠"弹窗打开期间轮询权限、拿到就自动关闭"来免掉手动点「重试」，
+// 前提是定时器能在 NSAlert.runModal() 的模态 run loop 中触发。这里实测一次。
+do {
+    let a = NSAlert()
+    a.messageText = "modal timer self-test"
+    a.informativeText = "此弹窗会在 0.6 秒后自动关闭"
+    a.addButton(withTitle: "OK")
+    var fired = false
+    let timer = Timer(timeInterval: 0.6, repeats: false) { t in
+        fired = true
+        t.invalidate()
+        NSApp.stopModal(withCode: .alertFirstButtonReturn)
+        a.window.orderOut(nil)
+    }
+    RunLoop.current.add(timer, forMode: .modalPanel)
+    // 保险：万一模态定时器不触发，3 秒后强制退出，避免卡死
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        if !fired { NSApp.stopModal(withCode: .alertSecondButtonReturn); a.window.orderOut(nil) }
+    }
+    let t0 = Date()
+    _ = a.runModal()
+    let dt = Date().timeIntervalSince(t0)
+    print("[验证] 模态 run loop 中定时器触发 = \(fired ? "OK" : "失败")  (耗时 \(String(format: "%.2f", dt))s)")
+    print("")
+}
+
 // ---------------------------------------------------------------- 2. 全部工具
 guard let screen = NSScreen.main ?? NSScreen.screens.first else {
     print("no screen"); exit(1)

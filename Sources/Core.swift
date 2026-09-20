@@ -76,6 +76,7 @@ enum ToolKind: String, CaseIterable {
     case number            // 序号标注（自动递增）
     case spotlight         // 聚焦高亮：其余部分压暗
     case blur, pixelate    // 打码：模糊 / 像素化
+    case eyedropper        // 屏幕取色
     case region, magnifier
     case zoomIn, zoomOut
 
@@ -97,6 +98,7 @@ enum ToolKind: String, CaseIterable {
         case .spotlight: return "flashlight.on.fill"
         case .blur: return "drop.fill"
         case .pixelate: return "squareshape.split.3x3"
+        case .eyedropper: return "eyedropper"
         case .region: return "rectangle.dashed"
         case .magnifier: return "magnifyingglass"
         case .zoomIn: return "plus.magnifyingglass"
@@ -122,6 +124,7 @@ enum ToolKind: String, CaseIterable {
         case .spotlight: return LS("Fokus", "Spotlight", "聚焦高亮", "聚焦高亮")
         case .blur: return LS("Weichzeichnen", "Blur", "模糊打码", "模糊打碼")
         case .pixelate: return LS("Verpixeln", "Pixelate", "马赛克打码", "馬賽克打碼")
+        case .eyedropper: return LS("Farbpipette", "Colour picker", "颜色吸管", "顏色吸管")
         case .region: return LS("Bildbereich wählen", "Select region", "选区", "選取範圍")
         case .magnifier: return LS("Lupe", "Magnifier", "放大镜", "放大鏡")
         case .zoomIn: return LS("Hineinzoomen", "Zoom in", "放大视图", "放大檢視")
@@ -148,6 +151,7 @@ enum ToolKind: String, CaseIterable {
         case .spotlight: return "S"
         case .blur: return "U"
         case .pixelate: return "I"
+        case .eyedropper: return "C"
         case .region: return "F"
         case .magnifier: return "M"
         case .zoomIn: return "+"
@@ -159,7 +163,7 @@ enum ToolKind: String, CaseIterable {
     /// 原版在缩放视图里禁用绘图；放大镜是查看工具，理应可用（也方便逐像素取色）。
     var worksWhileZoomed: Bool {
         switch self {
-        case .magnifier, .zoomIn, .zoomOut: return true
+        case .magnifier, .eyedropper, .zoomIn, .zoomOut: return true
         default: return false
         }
     }
@@ -187,13 +191,65 @@ enum Palette {
     static let checkGreen = NSColor(srgbRed: 0.09, green: 0.63, blue: 0.13, alpha: 1)
     static let crossRed = NSColor(srgbRed: 0.85, green: 0.09, blue: 0.09, alpha: 1)
 
-    /// 原版标准色：4 个透明 + 4 个不透明，再加白、黑（左列透明，右列不透明）
+    /// 每个槽位的默认颜色与透明度。透明度是槽位的属性 ——
+    /// 用户右键改颜色时只换色相，不改变它是"马克笔"还是"不透明色"。
+    static let defaults: [(NSColor, CGFloat)] = [
+        (red, markerAlpha), (red, 1),
+        (yellow, markerAlpha), (yellow, 1),
+        (green, markerAlpha), (green, 1),
+        (blue, markerAlpha), (blue, 1),
+        (white, 1), (black, 1)
+    ]
+
+    static let slotCount = defaults.count
+
+    /// 原版标准色：4 个透明 + 4 个不透明，再加白、黑（左列透明，右列不透明）。
+    /// 用户右键改过的槽位以 Prefs.paletteHexes 为准。
     static var standard: [Swatch] {
-        [Swatch(base: red, alpha: markerAlpha), Swatch(base: red, alpha: 1),
-         Swatch(base: yellow, alpha: markerAlpha), Swatch(base: yellow, alpha: 1),
-         Swatch(base: green, alpha: markerAlpha), Swatch(base: green, alpha: 1),
-         Swatch(base: blue, alpha: markerAlpha), Swatch(base: blue, alpha: 1),
-         Swatch(base: white, alpha: 1), Swatch(base: black, alpha: 1)]
+        let custom = Prefs.paletteHexes
+        return defaults.enumerated().map { i, d in
+            if i < custom.count, let c = NSColor(hex: custom[i]) {
+                return Swatch(base: c, alpha: d.1)
+            }
+            return Swatch(base: d.0, alpha: d.1)
+        }
+    }
+
+    struct Preset { let name: String; let hex: String }
+
+    /// 右键换色时可选的预设色
+    static let presets: [Preset] = [
+        Preset(name: LS("Rot", "Red", "红色", "紅色"), hex: "#E61C24"),
+        Preset(name: LS("Orange", "Orange", "橙色", "橙色"), hex: "#FF7A00"),
+        Preset(name: LS("Gelb", "Yellow", "黄色", "黃色"), hex: "#FFD400"),
+        Preset(name: LS("Grün", "Green", "绿色", "綠色"), hex: "#33BD33"),
+        Preset(name: LS("Türkis", "Teal", "青色", "青色"), hex: "#00C2A8"),
+        Preset(name: LS("Blau", "Blue", "蓝色", "藍色"), hex: "#2959E6"),
+        Preset(name: LS("Violett", "Purple", "紫色", "紫色"), hex: "#8B45D6"),
+        Preset(name: LS("Pink", "Pink", "粉色", "粉色"), hex: "#FF3D8B"),
+        Preset(name: LS("Braun", "Brown", "棕色", "棕色"), hex: "#8B5A2B"),
+        Preset(name: LS("Grau", "Grey", "灰色", "灰色"), hex: "#808080"),
+        Preset(name: LS("Weiß", "White", "白色", "白色"), hex: "#FFFFFF"),
+        Preset(name: LS("Schwarz", "Black", "黑色", "黑色"), hex: "#000000")
+    ]
+
+    /// 恢复某个槽位的默认颜色（传 nil 表示全部恢复）
+    static func resetSlot(_ index: Int?) {
+        var arr = Prefs.paletteHexes
+        if arr.isEmpty { arr = defaults.map { $0.0.hexString } }
+        if let i = index, i < arr.count { arr[i] = defaults[i].0.hexString }
+        else { arr = defaults.map { $0.0.hexString } }
+        Prefs.paletteHexes = arr
+    }
+
+    /// 设置某个槽位的颜色
+    static func setSlot(_ index: Int, hex: String) {
+        var arr = Prefs.paletteHexes
+        if arr.isEmpty { arr = defaults.map { $0.0.hexString } }
+        while arr.count < slotCount { arr.append(defaults[arr.count].0.hexString) }
+        guard index < arr.count else { return }
+        arr[index] = hex
+        Prefs.paletteHexes = arr
     }
 
     /// 用户自定义的附加色（最多 10 个，均为不透明）
@@ -244,9 +300,29 @@ enum Shape {
     case text(String, CGPoint, CGFloat)   // 文本、左上角、字号
     case check(CGPoint, CGFloat)          // 中心、尺寸
     case cross(CGPoint, CGFloat)
-    case number(Int, CGPoint, CGFloat)    // 序号、中心、直径
+    case number(Int, CGPoint, CGFloat, NumberShape)   // 序号、中心、直径、标记形状
     case spotlight(CGRect)                // 聚焦区（其余压暗）
     case redact(CGRect, RedactStyle)      // 打码区（读取底图做滤镜）
+}
+
+/// 序号的标记形状
+enum NumberShape: String, CaseIterable {
+    case circle, square, triangle
+
+    var title: String {
+        switch self {
+        case .circle:   return LS("Kreis", "Circle", "圆形", "圓形")
+        case .square:   return LS("Quadrat", "Square", "正方形", "正方形")
+        case .triangle: return LS("Gleichseitiges Dreieck", "Equilateral triangle", "等边三角形", "等邊三角形")
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .circle: return "circle"
+        case .square: return "square"
+        case .triangle: return "triangle"
+        }
+    }
 }
 
 /// 打码方式
@@ -347,8 +423,8 @@ enum ShapeRenderer {
             drawCheck(ctx, center: c, size: s, width: stroke.width)
         case .cross(let c, let s):
             drawCross(ctx, center: c, size: s, width: stroke.width)
-        case .number(let n, let c, let d):
-            drawNumber(ctx, n, center: c, diameter: d, color: stroke.color)
+        case .number(let n, let c, let d, let ns):
+            drawNumber(ctx, n, center: c, diameter: d, shape: ns, color: stroke.color)
         case .spotlight(let r):
             drawSpotlight(ctx, r)
         case .redact:
@@ -418,16 +494,41 @@ enum ShapeRenderer {
         return CGSize(width: max(w, fontSize), height: lineHeight * CGFloat(max(1, lines.count)))
     }
 
-    /// 序号标注：实心圆 + 白色数字
-    private static func drawNumber(_ ctx: CGContext, _ n: Int, center: CGPoint, diameter: CGFloat, color: NSColor) {
+    /// 序号标记的轮廓路径（圆形 / 正方形 / 等边三角形，都内接于给定矩形）
+    static func numberPath(_ shape: NumberShape, in r: CGRect) -> CGPath {
+        switch shape {
+        case .circle:
+            return CGPath(ellipseIn: r, transform: nil)
+        case .square:
+            let radius = r.width * 0.14
+            return CGPath(roundedRect: r, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        case .triangle:
+            // 等边三角形内接于该矩形的内切圆，重心即圆心
+            let cx = r.midX, cy = r.midY, rad = min(r.width, r.height) / 2
+            let path = CGMutablePath()
+            for i in 0..<3 {
+                let angle = -CGFloat.pi / 2 + CGFloat(i) * 2 * .pi / 3
+                let pt = CGPoint(x: cx + rad * cos(angle), y: cy + rad * sin(angle))
+                if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+            }
+            path.closeSubpath()
+            return path
+        }
+    }
+
+    /// 序号标注：实心标记 + 白色数字
+    private static func drawNumber(_ ctx: CGContext, _ n: Int, center: CGPoint,
+                                   diameter: CGFloat, shape: NumberShape, color: NSColor) {
         let d = max(18, diameter)
         let r = CGRect(x: center.x - d / 2, y: center.y - d / 2, width: d, height: d)
         ctx.saveGState()
         // 描一圈白边，保证在任何底色上都看得清
         ctx.setFillColor(NSColor.white.withAlphaComponent(0.92).cgColor)
-        ctx.fillEllipse(in: r.insetBy(dx: -1.5, dy: -1.5))
+        ctx.addPath(numberPath(shape, in: r.insetBy(dx: -1.5, dy: -1.5)))
+        ctx.fillPath()
         ctx.setFillColor((color.usingColorSpace(.sRGB) ?? color).cgColor)
-        ctx.fillEllipse(in: r)
+        ctx.addPath(numberPath(shape, in: r))
+        ctx.fillPath()
 
         let text = "\(n)"
         let fontSize = d * 0.52

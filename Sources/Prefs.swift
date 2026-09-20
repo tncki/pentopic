@@ -22,6 +22,9 @@ enum Prefs {
         static let buttonW = "buttonW"
         static let buttonH = "buttonH"
         static let extraColors = "extraColors"
+        static let paletteHexes = "paletteHexes"
+        static let numberShape = "numberShape"
+        static let shapeSlots = "shapeSlots"
         static let language = "language"
         static let hotKeyCode = "hotKeyCode"
         static let hotKeyModifiers = "hotKeyModifiers"
@@ -116,6 +119,37 @@ enum Prefs {
         set { d.set(Int(newValue), forKey: K.buttonH) }
     }
 
+    /// 用户右键改过的标准色槽位（空数组 = 全用默认色）
+    static var paletteHexes: [String] {
+        get { d.stringArray(forKey: K.paletteHexes) ?? [] }
+        set { d.set(Array(newValue.prefix(Palette.slotCount)), forKey: K.paletteHexes) }
+    }
+
+    /// 序号标记形状
+    static var numberShape: NumberShape {
+        get { NumberShape(rawValue: d.string(forKey: K.numberShape) ?? "") ?? .circle }
+        set { d.set(newValue.rawValue, forKey: K.numberShape) }
+    }
+
+    /// 形状槽位分配（7 个槽位，存 ToolKind 的 rawValue）。空 = 默认布局。
+    static var shapeSlots: [String] {
+        get { d.stringArray(forKey: K.shapeSlots) ?? [] }
+        set { d.set(newValue, forKey: K.shapeSlots) }
+    }
+
+    /// 可被右键替换的形状工具及其默认排布
+    static let shapeCatalog: [ToolKind] = [.line, .arrow, .doubleArrow,
+                                           .rect, .rectFilled, .ellipse, .ellipseFilled]
+    static var defaultShapeSlots: [String] { shapeCatalog.map { $0.rawValue } }
+
+    /// 当前生效的形状槽位（长度与 shapeCatalog 一致）
+    static var effectiveShapeSlots: [ToolKind] {
+        let stored = shapeSlots
+        guard stored.count == shapeCatalog.count else { return shapeCatalog }
+        let parsed = stored.compactMap { ToolKind(rawValue: $0) }
+        return parsed.count == shapeCatalog.count ? parsed : shapeCatalog
+    }
+
     // MARK: 附加颜色
 
     static var extraColors: [String] {
@@ -207,6 +241,40 @@ enum Prefs {
     }
     static func setStartOrigin(_ p: NSPoint) {
         d.set(Double(p.x), forKey: K.startBtnX); d.set(Double(p.y), forKey: K.startBtnY)
+    }
+
+    /// 恢复默认布局：调色板、形状槽位、序号形状、附加颜色全部还原
+    static func resetLayout() {
+        d.removeObject(forKey: K.paletteHexes)
+        d.removeObject(forKey: K.shapeSlots)
+        d.removeObject(forKey: K.numberShape)
+        d.removeObject(forKey: K.extraColors)
+        d.removeObject(forKey: K.lastSwatch)
+        d.removeObject(forKey: K.lastTool)
+        d.removeObject(forKey: K.lastPenSize)
+    }
+
+    // MARK: 配置导出 / 导入
+
+    /// 可保存的界面配置项
+    static var layoutSnapshot: [String: Any] {
+        ["paletteHexes": paletteHexes,
+         "shapeSlots": shapeSlots,
+         "numberShape": numberShape.rawValue,
+         "extraColors": extraColors,
+         "penSize": lastPenSize,
+         "swatch": lastSwatch,
+         "tool": lastTool.rawValue]
+    }
+
+    static func applyLayout(_ dict: [String: Any]) {
+        if let v = dict["paletteHexes"] as? [String] { paletteHexes = v }
+        if let v = dict["shapeSlots"] as? [String] { shapeSlots = v }
+        if let v = dict["numberShape"] as? String, let n = NumberShape(rawValue: v) { numberShape = n }
+        if let v = dict["extraColors"] as? [String] { extraColors = v }
+        if let v = dict["penSize"] as? Int { lastPenSize = v }
+        if let v = dict["swatch"] as? Int { lastSwatch = v }
+        if let v = dict["tool"] as? String, let t = ToolKind(rawValue: v) { lastTool = t }
     }
 
     static func ensureFolders() {

@@ -224,7 +224,7 @@ do {
         // 大中小三种直径各画一个，方便肉眼判断居中
         for (i, d) in [CGFloat(60), 100, 160].enumerated() {
             let c = CGPoint(x: 160 + CGFloat(i) * 220, y: 160)
-            let stk = Stroke(shape: .number(i + 1, c, d), color: Palette.red, width: 6)
+            let stk = Stroke(shape: .number(i + 1, c, d, .circle), color: Palette.red, width: 6)
             st.layer.apply(stk); st.strokes.append(stk)
         }
         if let cg = st.composeCG(region: CGRect(x: 40, y: 40, width: 640, height: 240)) {
@@ -292,9 +292,9 @@ if let st = CanvasState(screen: screen, captured: cap) {
     strokes.append(Stroke(shape: .cross(CGPoint(x: 600, y: 360), 56), color: red, width: 4))
     strokes.append(Stroke(shape: .freehand((0..<40).map { i in
         CGPoint(x: 700 + CGFloat(i) * 5, y: 345 + sin(CGFloat(i) / 3) * 12) }), color: marker, width: 26))
-    strokes.append(Stroke(shape: .number(1, CGPoint(x: 120, y: 470), 44), color: red, width: 4))
-    strokes.append(Stroke(shape: .number(2, CGPoint(x: 200, y: 470), 44), color: blue, width: 4))
-    strokes.append(Stroke(shape: .number(3, CGPoint(x: 280, y: 470), 44), color: NSColor.black, width: 4))
+    strokes.append(Stroke(shape: .number(1, CGPoint(x: 120, y: 470), 44, .circle), color: red, width: 4))
+    strokes.append(Stroke(shape: .number(2, CGPoint(x: 200, y: 470), 44, .circle), color: blue, width: 4))
+    strokes.append(Stroke(shape: .number(3, CGPoint(x: 280, y: 470), 44, .circle), color: NSColor.black, width: 4))
     strokes.append(Stroke(shape: .spotlight(CGRect(x: 420, y: 400, width: 360, height: 180)), color: red, width: 4))
     for s in strokes { st.layer.apply(s); st.strokes.append(s) }
     if let cg = st.composeCG(region: nil) {
@@ -400,8 +400,8 @@ if let v = sc.allViews().first {
     let s1 = Stroke(shape: .arrow(CGPoint(x: 860, y: 330), CGPoint(x: 760, y: 200)), color: Palette.red, width: 9)
     let s2 = Stroke(shape: .text("Live-Overlay", CGPoint(x: 60, y: 480), 46), color: Palette.blue, width: 6)
     let s3 = Stroke(shape: .check(CGPoint(x: 300, y: 560), 90), color: Palette.green, width: 6)
-    let s4 = Stroke(shape: .number(1, CGPoint(x: 640, y: 430), 46), color: Palette.red, width: 5)
-    let s5 = Stroke(shape: .number(2, CGPoint(x: 720, y: 430), 46), color: Palette.red, width: 5)
+    let s4 = Stroke(shape: .number(1, CGPoint(x: 640, y: 430), 46, .circle), color: Palette.red, width: 5)
+    let s5 = Stroke(shape: .number(2, CGPoint(x: 720, y: 430), 46, .circle), color: Palette.red, width: 5)
     for s in [blurStroke, pixelStroke, s1, s2, s3, s4, s5] {
         v.state.layer.apply(s); v.state.strokes.append(s)
     }

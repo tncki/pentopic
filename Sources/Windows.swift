@@ -1,6 +1,7 @@
 // Windows.swift — 覆盖窗口 / 工具栏面板 / 放大镜 / 会话控制器
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - 冻结覆盖窗口
 
@@ -177,6 +178,152 @@ final class ToastPanel: NSPanel {
     @objc private func hideNow() { orderOut(nil) }
 }
 
+// MARK: - 悬停提示（自绘）
+//
+// SwiftUI 的 .help() 在 nonactivatingPanel（工具栏就是）里不会弹出，
+// 所以自己做一个跟随鼠标的小浮层。
+final class TooltipPanel: NSPanel {
+    private let label = NSTextField(labelWithString: "")
+
+    init() {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 120, height: 26),
+                   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 4)
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        ignoresMouseEvents = true
+        isReleasedWhenClosed = false
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.textColor = .white
+        label.alignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 120, height: 26))
+        box.wantsLayer = true
+        box.layer?.backgroundColor = NSColor(srgbRed: 0.10, green: 0.11, blue: 0.14, alpha: 0.94).cgColor
+        box.layer?.cornerRadius = 6
+        box.layer?.borderWidth = 1
+        box.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        label.frame = NSRect(x: 8, y: 5, width: 104, height: 16)
+        label.autoresizingMask = [.width]
+        box.addSubview(label)
+        contentView = box
+    }
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    func show(_ text: String) {
+        guard !text.isEmpty else { hide(); return }
+        label.stringValue = text
+        let size = (text as NSString).size(withAttributes: [.font: label.font as Any])
+        let w = min(420, size.width + 22), h: CGFloat = 26
+        setContentSize(NSSize(width: w, height: h))
+        contentView?.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        label.frame = NSRect(x: 8, y: 5, width: w - 16, height: 16)
+        let m = NSEvent.mouseLocation
+        // 放在光标右下，靠边时翻到另一侧
+        var x = m.x + 14, y = m.y - h - 14
+        if let scr = NSScreen.screens.first(where: { $0.frame.contains(m) }) {
+            if x + w > scr.frame.maxX { x = m.x - w - 14 }
+            if y < scr.frame.minY { y = m.y + 14 }
+        }
+        setFrameOrigin(NSPoint(x: x, y: y))
+        if !isVisible { orderFrontRegardless() }
+    }
+
+    func hide() { orderOut(nil) }
+}
+
+// MARK: - 取色面板
+
+final class ColorInfoPanel: NSPanel {
+    private let swatch = NSView()
+    private let hexLabel = NSTextField(labelWithString: "")
+    private let rgbLabel = NSTextField(labelWithString: "")
+    private let hslLabel = NSTextField(labelWithString: "")
+    private var currentHex = "#000000"
+
+    init() {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 190, height: 78),
+                   styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 4)
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        isReleasedWhenClosed = false
+
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: 190, height: 78))
+        box.wantsLayer = true
+        box.layer?.backgroundColor = NSColor(srgbRed: 0.10, green: 0.11, blue: 0.14, alpha: 0.95).cgColor
+        box.layer?.cornerRadius = 8
+        box.layer?.borderWidth = 1
+        box.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+
+        swatch.frame = NSRect(x: 10, y: 12, width: 54, height: 54)
+        swatch.wantsLayer = true
+        swatch.layer?.cornerRadius = 6
+        swatch.layer?.borderWidth = 1
+        swatch.layer?.borderColor = NSColor.white.withAlphaComponent(0.35).cgColor
+        box.addSubview(swatch)
+
+        let hint = NSTextField(labelWithString: LS("Klicken = kopieren", "Click = copy", "点击复制", "點擊複製"))
+        hint.font = .systemFont(ofSize: 9)
+        hint.textColor = NSColor.white.withAlphaComponent(0.5)
+        hint.frame = NSRect(x: 10, y: 2, width: 60, height: 12)
+        box.addSubview(hint)
+
+        for (i, f) in [hexLabel, rgbLabel, hslLabel].enumerated() {
+            f.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+            f.textColor = .white
+            f.frame = NSRect(x: 74, y: 52 - CGFloat(i) * 18, width: 108, height: 15)
+            box.addSubview(f)
+        }
+        contentView = box
+    }
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    func show(_ color: NSColor, at screenPoint: NSPoint) {
+        let c = color.usingColorSpace(.sRGB) ?? color
+        currentHex = c.hexString
+        swatch.layer?.backgroundColor = c.cgColor
+        let r = Int(round(c.redComponent * 255)), g = Int(round(c.greenComponent * 255)), b = Int(round(c.blueComponent * 255))
+        hexLabel.stringValue = currentHex
+        rgbLabel.stringValue = "R \(r)  G \(g)  B \(b)"
+        // HSL
+        let rf = c.redComponent, gf = c.greenComponent, bf = c.blueComponent
+        let mx = max(rf, gf, bf), mn = min(rf, gf, bf)
+        let l = (mx + mn) / 2
+        var h: CGFloat = 0, sat: CGFloat = 0
+        if mx != mn {
+            let d = mx - mn
+            sat = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn)
+            if mx == rf { h = (gf - bf) / d + (gf < bf ? 6 : 0) }
+            else if mx == gf { h = (bf - rf) / d + 2 }
+            else { h = (rf - gf) / d + 4 }
+            h /= 6
+        }
+        hslLabel.stringValue = String(format: "H %.0f°  S %.0f%%  L %.0f%%", h * 360, sat * 100, l * 100)
+
+        var origin = NSPoint(x: screenPoint.x + 18, y: screenPoint.y - 90)
+        if let scr = NSScreen.screens.first(where: { $0.frame.contains(screenPoint) }) {
+            if origin.x + 190 > scr.frame.maxX { origin.x = screenPoint.x - 208 }
+            if origin.y < scr.frame.minY { origin.y = screenPoint.y + 18 }
+        }
+        setFrameOrigin(origin)
+        orderFrontRegardless()
+    }
+
+    /// 点击面板 = 复制 HEX。用本地点击监视器实现（面板自身不接收鼠标事件时也能用）。
+    func copyCurrent() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(currentHex, forType: .string)
+    }
+}
+
 // MARK: - 工具栏数据模型
 
 final class ToolbarModel: ObservableObject {
@@ -207,6 +354,8 @@ final class SessionController: NSObject, NSMenuDelegate {
     private var toolbarPanel: ToolbarPanel?
     private var hostingView: NSHostingView<ToolbarView>?
     var magnifier: MagnifierPanel?
+    private var tooltip: TooltipPanel?
+    private var colorInfo: ColorInfoPanel?
     private var toast: ToastPanel?
     private var startPanel: StartButtonPanel?
     private var previousApp: NSRunningApplication?
@@ -551,6 +700,63 @@ final class SessionController: NSObject, NSMenuDelegate {
         syncModel()
     }
 
+    // MARK: 悬停提示
+
+    /// SwiftUI 的 .help() 在 nonactivatingPanel 里不弹，所以自己控制
+    func showTooltip(_ text: String?) {
+        if let t = text, !t.isEmpty {
+            if tooltip == nil { tooltip = TooltipPanel() }
+            tooltip?.show(t)
+        } else {
+            tooltip?.hide()
+        }
+    }
+
+    // MARK: 界面自定义（右键菜单调用）
+
+    /// 把某个形状槽位换成另一个形状
+    func assignShapeSlot(_ slot: Int, to tool: ToolKind) {
+        var slots = Prefs.effectiveShapeSlots
+        guard slot < slots.count else { return }
+        slots[slot] = tool
+        Prefs.shapeSlots = slots.map { $0.rawValue }
+        rebuildToolbar()
+        syncModel()
+    }
+
+    func setNumberShape(_ shape: NumberShape) {
+        Prefs.numberShape = shape
+        rebuildToolbar()
+        flashStatus(LS("Markierungsform: \(shape.title)", "Marker shape: \(shape.title)",
+                       "序号形状：\(shape.title)", "序號形狀：\(shape.title)"))
+    }
+
+    /// 用系统颜色面板给某个颜色槽位选新颜色
+    func pickColorForSlot(_ index: Int) {
+        let current = Palette.all.indices.contains(index) ? Palette.all[index].color.hexString : "#FF0000"
+        ColorPanelBridge.shared.pick(from: current) { [weak self] hex in
+            self?.setPaletteSlot(index, to: hex)
+        }
+    }
+
+    func setPaletteSlot(_ index: Int, to hex: String) {
+        Palette.setSlot(index, hex: hex)
+        rebuildToolbar()
+        syncModel()
+    }
+
+    // MARK: 取色
+
+    func sampleColor(canvas st: CanvasState, at point: CGPoint) {
+        guard let img = st.composeCG(region: nil),
+              let col = PixelSampler.color(of: img, at: CGPoint(x: point.x * st.scale, y: point.y * st.scale)) else { return }
+        if colorInfo == nil { colorInfo = ColorInfoPanel() }
+        colorInfo?.show(col, at: NSEvent.mouseLocation)
+        // 取色即复制，符合"吸管"的直觉
+        colorInfo?.copyCurrent()
+        flashStatus(LS("Farbe \(col.hexString) kopiert", "Colour \(col.hexString) copied", "已复制颜色 \(col.hexString)", "已複製顏色 \(col.hexString)"))
+    }
+
     func flashStatus(_ s: String) {
         if toast == nil { toast = ToastPanel() }
         toast?.show(s)
@@ -571,6 +777,9 @@ final class SessionController: NSObject, NSMenuDelegate {
         }
         applyTool(t, silent: false)
     }
+
+    /// 供布局重置调用（applyTool 是私有的）
+    func applyToolPublic(_ t: ToolKind) { applyTool(t, silent: false) }
 
     private func applyTool(_ t: ToolKind, silent: Bool) {
         if t != .zoomIn && t != .zoomOut { previousTool = t }
@@ -891,6 +1100,73 @@ final class LightButton: NSButton {
         str.draw(at: NSPoint(x: (bounds.width - size.width) / 2,
                              y: (bounds.height - size.height) / 2),
                  withAttributes: attrs)
+    }
+}
+
+// MARK: - 界面布局配置的保存 / 载入 / 重置
+
+/// 自检用：只重置偏好，不触碰 UI
+func LayoutConfigResetForTest() { Prefs.resetLayout() }
+
+enum LayoutConfig {
+
+    static func save() {
+        let panel = NSSavePanel()
+        panel.title = LS("Layout speichern", "Save layout", "保存布局", "儲存版面")
+        panel.nameFieldStringValue = "PentoPic-Layout.json"
+        panel.allowedContentTypes = [.json]
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 6)
+        let resp = SessionController.shared.withSuspendedOverlays { panel.runModal() }
+        guard resp == .OK, let url = panel.url else { return }
+        let payload: [String: Any] = ["version": 1,
+                                      "app": Brand.name,
+                                      "layout": Prefs.layoutSnapshot]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload,
+                                                  options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: url)
+            SessionController.shared.flashStatus(LS("Layout gespeichert", "Layout saved", "布局已保存", "版面已儲存"))
+        } catch {
+            Alert.error(LS("Speichern fehlgeschlagen", "Save failed", "保存失败", "儲存失敗"), error.localizedDescription)
+        }
+    }
+
+    static func load() {
+        let panel = NSOpenPanel()
+        panel.title = LS("Layout laden", "Load layout", "载入布局", "載入版面")
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 6)
+        let resp = SessionController.shared.withSuspendedOverlays { panel.runModal() }
+        guard resp == .OK, let url = panel.url else { return }
+        do {
+            let data = try Data(contentsOf: url)
+            guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let layout = obj["layout"] as? [String: Any] else {
+                Alert.error(LS("Ungültige Datei", "Invalid file", "文件无效", "檔案無效"),
+                            LS("Diese Datei enthält kein Layout.", "This file contains no layout.", "该文件里没有布局配置。", "該檔案裡沒有版面設定。"))
+                return
+            }
+            Prefs.applyLayout(layout)
+            SessionController.shared.onToolChanged()
+            SessionController.shared.rebuildToolbar()
+            SessionController.shared.flashStatus(LS("Layout geladen", "Layout loaded", "布局已载入", "版面已載入"))
+        } catch {
+            Alert.error(LS("Laden fehlgeschlagen", "Load failed", "载入失败", "載入失敗"), error.localizedDescription)
+        }
+    }
+
+    static func reset() {
+        Prefs.resetLayout()
+        SessionController.shared.setSwatch(0)
+        SessionController.shared.setPenSize(1)
+        SessionController.shared.applyToolPublic(.pen)
+        SessionController.shared.onToolChanged()
+        SessionController.shared.rebuildToolbar()
+        SessionController.shared.flashStatus(LS("Standardlayout wiederhergestellt",
+                                                "Default layout restored",
+                                                "已恢复默认布局",
+                                                "已恢復預設版面"))
     }
 }
 

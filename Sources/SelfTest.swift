@@ -448,13 +448,13 @@ enum SelfTest {
         var placed: [Int] = []
         for x in [200.0, 320.0, 440.0] {
             click(CGPoint(x: x, y: 600))
-            if case .number(let n, _, _) = st.strokes.last?.shape ?? .rect(.zero) { placed.append(n) }
+            if case .number(let n, _, _, _) = st.strokes.last?.shape ?? .rect(.zero) { placed.append(n) }
         }
         check("序号自动递增 1,2,3", placed == [1, 2, 3], "实际 \(placed)")
         sc.undo(); pump(0.1)
         check("撤销后序号重算为 3", st.nextNumber == 3, "nextNumber = \(st.nextNumber)")
         click(CGPoint(x: 560, y: 600))
-        if case .number(let n, _, _) = st.strokes.last?.shape ?? .rect(.zero) {
+        if case .number(let n, _, _, _) = st.strokes.last?.shape ?? .rect(.zero) {
             check("重新落号接续为 3", n == 3, "实际 \(n)")
         }
 
@@ -604,6 +604,106 @@ enum SelfTest {
         check("正常完成的拖动会留下笔画", st.strokes.count == strokesBeforeCancel + 1,
               "笔画数 \(strokesBeforeCancel) → \(st.strokes.count)")
         sc.clearAll(); pump(0.15)
+
+        // ---- 4g. 界面自定义（调色板 / 形状槽位 / 序号形状 / 布局配置）----
+        log("")
+        log("[4g] 界面自定义")
+
+        // 调色板换色
+        let slotBefore = Palette.standard[0].base.hexString
+        Palette.setSlot(0, hex: "#123456")
+        check("调色板槽位可换色", Palette.standard[0].base.hexString == "#123456",
+              "\(slotBefore) → \(Palette.standard[0].base.hexString)")
+        check("换色不改变该槽位的透明度（仍是马克笔）", !Palette.standard[0].isOpaque)
+        Palette.resetSlot(0)
+        check("可恢复默认颜色", Palette.standard[0].base.hexString == slotBefore,
+              "→ \(Palette.standard[0].base.hexString)")
+
+        // 形状槽位可替换
+        let slotBackup = Prefs.shapeSlots
+        SessionController.shared.assignShapeSlot(0, to: .ellipseFilled)
+        check("形状槽位可替换", Prefs.effectiveShapeSlots[0] == .ellipseFilled,
+              "槽位0 → \(Prefs.effectiveShapeSlots[0].rawValue)")
+        Prefs.shapeSlots = slotBackup
+        check("形状槽位可还原", Prefs.effectiveShapeSlots[0] == .line)
+
+        // 序号形状：三种形状的填充率应当显著不同
+        // 圆 ≈ π/4 = 78.5%，正方形 = 100%，等边三角形 ≈ 50%
+        log("")
+        log("[4g-2] 序号形状（用填充率验证形状确实变了）")
+        sc.clearAll(); sc.setBackground(.white); pump(0.25)
+        sc.setPenSize(3); sc.setSwatch(1); sc.setTool(.number)
+        let shapeCenters: [(NumberShape, CGPoint)] = [
+            (.circle, CGPoint(x: 300, y: 300)),
+            (.square, CGPoint(x: 700, y: 300)),
+            (.triangle, CGPoint(x: 1100, y: 300))
+        ]
+        func fillRatio(_ center: CGPoint) -> Double? {
+            guard let img = st.composeCG(region: nil) else { return nil }
+            let half: CGFloat = 70
+            let px = CGRect(x: (center.x - half) * st.scale, y: (center.y - half) * st.scale,
+                            width: half * 2 * st.scale, height: half * 2 * st.scale).integral
+            let w = Int(px.width), h = Int(px.height)
+            var buf = [UInt8](repeating: 0, count: w * h * 4)
+            let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+            guard let sub = img.cropping(to: px),
+                  let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8,
+                                      bytesPerRow: w * 4, space: cs,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            ctx.interpolationQuality = .none
+            ctx.draw(sub, in: CGRect(x: 0, y: 0, width: w, height: h))
+            var minX = w, maxX = -1, minY = h, maxY = -1
+            for y in 0..<h { for x in 0..<w {
+                let o = (y * w + x) * 4
+                if Int(buf[o]) > 150, Int(buf[o+1]) < 90, Int(buf[o+2]) < 90 {
+                    minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+                }
+            } }
+            guard maxX > minX, maxY > minY else { return nil }
+            var filled = 0, total = 0
+            for y in minY...maxY { for x in minX...maxX {
+                let o = (y * w + x) * 4
+                total += 1
+                if Int(buf[o]) > 150, Int(buf[o+1]) < 90, Int(buf[o+2]) < 90 { filled += 1 }
+            } }
+            return total > 0 ? Double(filled) / Double(total) : nil
+        }
+        var ratios: [NumberShape: Double] = [:]
+        for (shape, center) in shapeCenters {
+            Prefs.numberShape = shape
+            click(center); pump(0.2)
+            if let r = fillRatio(center) { ratios[shape] = r }
+        }
+        if let rc = ratios[.circle], let rs = ratios[.square], let rt = ratios[.triangle] {
+            log(String(format: "  填充率: 圆 %.0f%%  方 %.0f%%  三角 %.0f%%", rc * 100, rs * 100, rt * 100))
+            // 实测值会低于理论值（π/4≈78.5%、100%、50%），因为数字本身是白色、
+            // 从彩色标记里被挖掉了，另外抗锯齿边缘也不算作红色。
+            // 所以断言"相对关系 + 区分度"，而不是绝对值。
+            check("正方形填充率 > 圆形（方 > 圆 > 三角）", rs > rc && rc > rt,
+                  String(format: "%.0f%% > %.0f%% > %.0f%%", rs * 100, rc * 100, rt * 100))
+            check("三种形状区分度足够（两两相差 >8 个百分点）",
+                  (rs - rc) > 0.08 && (rc - rt) > 0.08,
+                  String(format: "方-圆 %.0f%%，圆-三角 %.0f%%", (rs - rc) * 100, (rc - rt) * 100))
+            check("方形接近铺满（>85%）", rs > 0.85, String(format: "%.0f%%", rs * 100))
+            check("三角约为方形的一半（0.38–0.60）", (rt / rs) > 0.38 && (rt / rs) < 0.60,
+                  String(format: "%.2f", rt / rs))
+        } else {
+            check("三种序号形状都能测到", false, "未能采集到填充率")
+        }
+        Prefs.numberShape = .circle
+
+        // 布局配置：重置应恢复默认
+        Prefs.numberShape = .triangle
+        Palette.setSlot(2, hex: "#ABCDEF")
+        Prefs.shapeSlots = [ToolKind.ellipse.rawValue] + Prefs.defaultShapeSlots.dropFirst()
+        LayoutConfigResetForTest()
+        check("重置布局恢复序号形状", Prefs.numberShape == .circle, Prefs.numberShape.rawValue)
+        check("重置布局恢复调色板", Palette.standard[2].base.hexString == Palette.defaults[2].0.hexString)
+        check("重置布局恢复形状槽位", Prefs.effectiveShapeSlots[0] == .line,
+              Prefs.effectiveShapeSlots[0].rawValue)
+
+        sc.clearAll(); sc.setBackground(.currentScreen); pump(0.25)
+        sc.setPenSize(1); sc.setSwatch(0); sc.setTool(.pen)
 
         // ---- 5. 撤销 ----
         log("")

@@ -41,12 +41,19 @@ private struct TButton<Content: View>: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        // SwiftUI 的 .help() 在 nonactivatingPanel（工具栏就是）里不会弹出，
+        // 所以自己控制一个跟随鼠标的浮层
+        .onHover { inside in
+            SessionController.shared.showTooltip(inside ? help : nil)
+        }
     }
 }
 
 private struct ToolButton: View {
     let tool: ToolKind
     let active: Bool
+    /// 非 nil 表示这是右鍵可替换的"形状槽位"（索引指向 Prefs.shapeCatalog）
+    var shapeSlot: Int? = nil
     let action: () -> Void
 
     // 原版：对勾为绿色、叉号为红色
@@ -58,7 +65,7 @@ private struct ToolButton: View {
         }
     }
 
-    var body: some View {
+    private var base: some View {
         TButton(help: "\(tool.title)  (\(tool.shortcutHint))", active: active, action: action) {
             if tool == .text {
                 // 原版文字工具就是一个大写的 “A”（SF Symbol textformat 会随语言变成本地字形）
@@ -70,6 +77,30 @@ private struct ToolButton: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(tint)
             }
+        }
+    }
+
+    var body: some View { base.contextMenu { contextItems } }
+
+    @ViewBuilder private var contextItems: some View {
+        if let slot = shapeSlot {
+            Section(LS("Diese Taste belegen mit:", "Assign this button to:", "把这个按钮换成：", "把這個按鈕換成：")) {
+                ForEach(Array(Prefs.shapeCatalog.enumerated()), id: \.offset) { _, t in
+                    Button {
+                        SessionController.shared.assignShapeSlot(slot, to: t)
+                    } label: { Label(t.title, systemImage: t.symbol) }
+                }
+            }
+        } else if tool == .number {
+            Section(LS("Markierungsform:", "Marker shape:", "序号形状：", "序號形狀：")) {
+                ForEach(NumberShape.allCases, id: \.rawValue) { ns in
+                    Button {
+                        SessionController.shared.setNumberShape(ns)
+                    } label: { Label(ns.title, systemImage: ns.symbol) }
+                }
+            }
+        } else {
+            Text(tool.title)
         }
     }
 }
@@ -93,6 +124,7 @@ private struct ActionButton: View {
 private struct SwatchButton: View {
     let swatch: Swatch
     let active: Bool
+    let index: Int
     let action: () -> Void
     var body: some View {
         Button(action: action) {
@@ -111,6 +143,22 @@ private struct SwatchButton: View {
         .buttonStyle(.plain)
         .help(swatch.isOpaque ? LS("Deckende Farbe", "Opaque color", "不透明色", "不透明色")
                               : LS("Transparente Farbe", "Transparent color", "透明色", "透明色"))
+        .contextMenu {
+            Button(LS("Farbe ändern …", "Change colour …", "更换颜色 …", "更換顏色 …")) {
+                SessionController.shared.pickColorForSlot(index)
+            }
+            Menu(LS("Voreingestellte Farben", "Preset colours", "预设颜色", "預設顏色")) {
+                ForEach(Palette.presets, id: \.hex) { p in
+                    Button(p.name) { SessionController.shared.setPaletteSlot(index, to: p.hex) }
+                }
+            }
+            Divider()
+            Button(LS("Standardfarbe", "Default colour", "恢复默认颜色", "恢復預設顏色")) {
+                Palette.resetSlot(index)
+                SessionController.shared.onToolChanged()
+                SessionController.shared.rebuildToolbar()
+            }
+        }
     }
 }
 
@@ -142,11 +190,25 @@ struct ToolbarView: View {
         }
     }
 
-    private var rowPairs: [(ToolKind, ToolKind)] {
-        [(.pen, .eraser), (.line, .arrow), (.rect, .rectFilled), (.ellipse, .ellipseFilled),
-         (.doubleArrow, .text), (.check, .cross),
-         (.number, .spotlight), (.blur, .pixelate),        // 序号 / 聚焦 / 两种打码
-         (.region, .magnifier), (.zoomIn, .zoomOut)]
+    /// 工具槽位：固定工具，或可被右键替换的形状槽位
+    private enum ToolSlot {
+        case fixed(ToolKind)
+        case shape(Int)          // 索引指向 Prefs.shapeCatalog
+    }
+
+    /// 11 行 × 2 列。第 2–5 行是可自定义的形状槽位。
+    private var toolRows: [[ToolSlot]] {
+        [[.fixed(.pen), .fixed(.eraser)],
+         [.shape(0), .shape(1)],                      // 直线 / 箭头
+         [.shape(3), .shape(4)],                      // 矩形 / 实心矩形
+         [.shape(5), .shape(6)],                      // 椭圆 / 实心椭圆
+         [.shape(2), .fixed(.text)],                  // 双向箭头 / 文字
+         [.fixed(.check), .fixed(.cross)],
+         [.fixed(.number), .fixed(.spotlight)],
+         [.fixed(.blur), .fixed(.pixelate)],
+         [.fixed(.eyedropper), .fixed(.region)],
+         [.fixed(.magnifier), .fixed(.zoomIn)],
+         [.fixed(.zoomOut)]]
     }
 
     var body: some View {
@@ -232,7 +294,7 @@ struct ToolbarView: View {
                 HStack(spacing: 3) {
                     ForEach(Array(pair.enumerated()), id: \.offset) { _, sw in
                         let idx = model.swatches.firstIndex(where: { $0.base == sw.base && $0.alpha == sw.alpha }) ?? 0
-                        SwatchButton(swatch: sw, active: model.swatchIndex == idx) {
+                        SwatchButton(swatch: sw, active: model.swatchIndex == idx, index: idx) {
                             controller.setSwatch(idx)
                         }
                     }
@@ -243,11 +305,22 @@ struct ToolbarView: View {
     }
 
     private var toolGrid: some View {
-        VStack(spacing: 3) {
-            ForEach(Array(rowPairs.enumerated()), id: \.offset) { _, pair in
+        let shapes = Prefs.effectiveShapeSlots
+        return VStack(spacing: 3) {
+            ForEach(Array(toolRows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 3) {
-                    ToolButton(tool: pair.0, active: model.tool == pair.0) { controller.setTool(pair.0) }
-                    ToolButton(tool: pair.1, active: model.tool == pair.1) { controller.setTool(pair.1) }
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, slot in
+                        switch slot {
+                        case .fixed(let t):
+                            ToolButton(tool: t, active: model.tool == t) { controller.setTool(t) }
+                        case .shape(let i):
+                            let t = i < shapes.count ? shapes[i] : .line
+                            ToolButton(tool: t, active: model.tool == t, shapeSlot: i) {
+                                controller.setTool(t)
+                            }
+                        }
+                    }
+                    if row.count == 1 { Spacer().frame(width: Prefs.buttonW) }
                 }
             }
         }
@@ -290,7 +363,29 @@ struct ToolbarView: View {
                              help: LS("Info & Einstellungen", "Info & settings", "信息与设置", "資訊與設定")) {
                     SettingsWindowController.shared.show()
                 }
-                Spacer().frame(width: Prefs.buttonW)
+                Menu {
+                    Button(LS("Layout speichern …", "Save layout …", "保存布局 …", "儲存版面 …")) {
+                        LayoutConfig.save()
+                    }
+                    Button(LS("Layout laden …", "Load layout …", "载入布局 …", "載入版面 …")) {
+                        LayoutConfig.load()
+                    }
+                    Divider()
+                    Button(LS("Standardlayout wiederherstellen", "Restore default layout",
+                              "重置默认布局", "重置預設版面")) {
+                        LayoutConfig.reset()
+                    }
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.55)))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.28), lineWidth: 1))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+                .help(LS("Layout", "Layout", "布局配置", "版面設定"))
             }
         }
     }

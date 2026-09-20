@@ -387,6 +387,8 @@ final class CanvasView: NSView {
                 return CursorFactory.text()
             case .magnifier:
                 return CursorFactory.magnifier()
+            case .eyedropper:
+                return CursorFactory.eyedropper()
             default:
                 return CursorFactory.crosshair()
             }
@@ -394,6 +396,7 @@ final class CanvasView: NSView {
         switch tool {
         case .text: return .iBeam
         case .magnifier: return CursorFactory.magnifier()
+        case .eyedropper: return CursorFactory.eyedropper()
         case .pen, .eraser: return .crosshair
         default: return .crosshair
         }
@@ -581,6 +584,10 @@ final class CanvasView: NSView {
                 c.magnifier?.update(canvas: state, at: p, penSize: c.penSize)
                 return
             }
+            if c.tool == .eyedropper {
+                c.sampleColor(canvas: state, at: p)
+                return
+            }
             if event.modifierFlags.contains(.shift), let full = state.zoomSource(),
                let col = PixelSampler.color(of: full, at: CGPoint(x: p.x * state.scale, y: p.y * state.scale)) {
                 let pb = NSPasteboard.general
@@ -622,7 +629,7 @@ final class CanvasView: NSView {
             isDragging = true
             needsDisplay = true
         case .number:
-            commit(Stroke(shape: .number(state.nextNumber, p, w * 2.4 + 14),
+            commit(Stroke(shape: .number(state.nextNumber, p, w * 2.4 + 14, Prefs.numberShape),
                           color: strokeColor, width: w))
         case .text:
             beginTextEditing(at: p, color: strokeColor, width: w)
@@ -643,6 +650,8 @@ final class CanvasView: NSView {
                 regionMoveOffset = nil
             }
             needsDisplay = true
+        case .eyedropper:
+            c.sampleColor(canvas: state, at: p)
         case .magnifier:
             c.magnifier?.toggleFactor()
             c.magnifier?.update(canvas: state, at: p, penSize: c.penSize)
@@ -990,6 +999,18 @@ enum CursorFactory {
         let c = NSCursor(image: img, hotSpot: NSPoint(x: 9, y: 11))
         cache["text"] = c
         return c
+    }
+
+    static func eyedropper() -> NSCursor {
+        if let c = cache["eyedrop"] { return c }
+        let cfg = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
+        if let sym = NSImage(systemSymbolName: "eyedropper", accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg) {
+            let c = NSCursor(image: sym, hotSpot: NSPoint(x: 2, y: 18))
+            cache["eyedrop"] = c
+            return c
+        }
+        return .crosshair
     }
 
     static func magnifier() -> NSCursor {

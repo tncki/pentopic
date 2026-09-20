@@ -1,6 +1,7 @@
 // PreviewMain.swift — 离屏渲染自检：工具栏外观 + 全部图形 + 合成方向验证
 import AppKit
 import SwiftUI
+import Carbon.HIToolbox
 
 // 项目根目录从本文件位置推导（Tools/preview/main.swift → 上溯三层），
 // 避免硬编码绝对路径 —— 这样改目录名、别人 clone 后都能直接用
@@ -164,6 +165,39 @@ do {
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         if i == 1 { print("[验证] 设置窗口关闭路径无递归闪退 = OK（开关 5 次）") }
     }
+    print("")
+}
+
+// ---------------------------------------------------------------- 1f. 快捷键规格单元测试
+do {
+    print("[验证] 全局热键规格")
+    var pass = 0, fail = 0
+    func expect(_ name: String, _ got: String, _ want: String) {
+        if got == want { pass += 1; print("  PASS  \(name) = \(got)") }
+        else { fail += 1; print("  FAIL  \(name) = \(got)，期望 \(want)") }
+    }
+    func expectBool(_ name: String, _ got: Bool, _ want: Bool) {
+        expect(name, got ? "true" : "false", want ? "true" : "false")
+    }
+
+    let f9 = HotKeySpec(keyCode: UInt32(kVK_F9), modifiers: 0)
+    let cmdP = HotKeySpec(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey))
+    let cmdShiftP = HotKeySpec(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey | shiftKey))
+    let bareP = HotKeySpec(keyCode: UInt32(kVK_ANSI_P), modifiers: 0)
+
+    expect("F9 显示", f9.display, "F9")
+    expect("⌘P 显示", cmdP.display, "⌘P")
+    expect("⌘⇧P 显示（macOS 惯例顺序 ⌃⌥⇧⌘）", cmdShiftP.display, "⇧⌘P")
+
+    expectBool("F9 合法（功能键无需修饰键）", f9.isValid, true)
+    expectBool("⌘P 合法", cmdP.isValid, true)
+    expectBool("裸 P 非法（会全局劫持字母键）", bareP.isValid, false)
+
+    expectBool("⌘P 有冲突警告", cmdP.conflictWarning != nil, true)
+    expectBool("F9 无冲突警告", f9.conflictWarning == nil, true)
+    expectBool("⌘⇧P 无冲突警告（非系统保留）", cmdShiftP.conflictWarning == nil, true)
+
+    print("  快捷键规格: \(pass) 通过, \(fail) 失败")
     print("")
 }
 

@@ -16,7 +16,8 @@ final class SettingsModel: ObservableObject {
     @Published var buttonW: Double = 30
     @Published var buttonH: Double = 30
     @Published var extraColors: [String] = []
-    @Published var hotKey: Int = 101
+    @Published var hotKeySpec: HotKeySpec = .default
+    @Published var hotKeyWarning: String?
 
     func load() {
         language = Prefs.language?.rawValue ?? "auto"
@@ -32,7 +33,8 @@ final class SettingsModel: ObservableObject {
         buttonW = Double(Prefs.buttonW)
         buttonH = Double(Prefs.buttonH)
         extraColors = Prefs.extraColors
-        hotKey = Prefs.hotKeyCode
+        hotKeySpec = Prefs.hotKeySpec
+        hotKeyWarning = Prefs.hotKeySpec.conflictWarning
     }
 
     func save() {
@@ -52,9 +54,9 @@ final class SettingsModel: ObservableObject {
         Prefs.setEmailFolder(URL(fileURLWithPath: (emailFolder as NSString).expandingTildeInPath))
         Prefs.extraColors = extraColors
         Prefs.ensureFolders()
-        if hotKey != Prefs.hotKeyCode {
-            Prefs.hotKeyCode = hotKey
-            GlobalHotKey.shared.registerCurrent()
+        if hotKeySpec != Prefs.hotKeySpec {
+            Prefs.hotKeySpec = hotKeySpec
+            GlobalHotKey.shared.register(hotKeySpec)
         }
         SessionController.shared.onToolChanged()
         SessionController.shared.rebuildToolbar()
@@ -178,16 +180,29 @@ struct SettingsView: View {
                             }
                         }.labelsHidden().frame(width: 220)
                     }
-
                     group(LS("Globaler Kurzbefehl (Start/Fertig)", "Global hotkey (start/finish)", "全局热键（开始/完成）", "全域快速鍵（開始/完成）")) {
-                        Picker("", selection: $m.hotKey) {
-                            Text("F9").tag(101)
-                            Text("F8").tag(100)
-                            Text("F10").tag(109)
-                            Text("F7").tag(98)
-                            Text("⌥⌘P").tag(-1)
-                            Text("⌃⌥P").tag(-2)
-                        }.labelsHidden().frame(width: 160)
+                        HStack(spacing: 8) {
+                            HotKeyRecorder(spec: $m.hotKeySpec) { m.hotKeyWarning = $0 }
+                                .frame(width: 200, height: 26)
+                            Button(LS("Zurücksetzen", "Reset", "重置", "重設")) {
+                                m.hotKeySpec = .default
+                                m.hotKeyWarning = nil
+                            }
+                            .buttonStyle(.link)
+                            .font(.system(size: 11))
+                            Spacer()
+                        }
+                        Text(LS("Anklicken und dann die gewünschte Tastenkombination drücken. ESC bricht ab.",
+                                "Click, then press the key combination you want. ESC cancels.",
+                                "点一下，然后按下你想要的组合键。按 ESC 取消。",
+                                "點一下，然後按下你想要的組合鍵。按 ESC 取消。"))
+                            .font(.system(size: 10)).foregroundColor(.secondary)
+                        if let w = m.hotKeyWarning {
+                            Text(w)
+                                .font(.system(size: 10))
+                                .foregroundColor(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
 
                     about

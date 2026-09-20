@@ -1,5 +1,6 @@
 // Prefs.swift — 偏好设置（对应原版“Einstellungen”对话框）
 import AppKit
+import Carbon.HIToolbox
 
 enum CursorMode: Int { case normal = 0, toolSymbol = 1 }
 enum ScreenMode: Int { case mouse = 0, first = 1, second = 2 }
@@ -23,6 +24,7 @@ enum Prefs {
         static let extraColors = "extraColors"
         static let language = "language"
         static let hotKeyCode = "hotKeyCode"
+        static let hotKeyModifiers = "hotKeyModifiers"
         static let lastTool = "lastTool"
         static let lastSwatch = "lastSwatch"
         static let lastPenSize = "lastPenSize"
@@ -151,9 +153,28 @@ enum Prefs {
 
     // MARK: 热键
 
-    static var hotKeyCode: Int {
-        get { d.integer(forKey: K.hotKeyCode) }
-        set { d.set(newValue, forKey: K.hotKeyCode) }
+    /// 全局热键。早期版本只存了 keyCode（-1/-2 是 ⌥⌘P / ⌃⌥P 的占位值），
+    /// 这里做一次性迁移，老用户的设置不会丢。
+    static var hotKeySpec: HotKeySpec {
+        get {
+            let code = d.integer(forKey: K.hotKeyCode)
+            guard d.object(forKey: K.hotKeyModifiers) != nil else {
+                switch code {
+                case -1: return HotKeySpec(keyCode: UInt32(kVK_ANSI_P),
+                                           modifiers: UInt32(cmdKey | optionKey))
+                case -2: return HotKeySpec(keyCode: UInt32(kVK_ANSI_P),
+                                           modifiers: UInt32(controlKey | optionKey))
+                case 0:  return .default
+                default: return HotKeySpec(keyCode: UInt32(max(0, code)), modifiers: 0)
+                }
+            }
+            return HotKeySpec(keyCode: UInt32(max(0, code)),
+                              modifiers: UInt32(max(0, d.integer(forKey: K.hotKeyModifiers))))
+        }
+        set {
+            d.set(Int(newValue.keyCode), forKey: K.hotKeyCode)
+            d.set(Int(newValue.modifiers), forKey: K.hotKeyModifiers)
+        }
     }
 
     // MARK: 会话记忆

@@ -306,6 +306,11 @@ final class SessionController: NSObject, NSMenuDelegate {
             return
         }
 
+        // 会话进行中注销全局热键：否则它会**系统级吞掉**该按键。
+        // 例如把 ⌘P 设为热键后，注册状态下应用内的「打印」就再也收不到 ⌘P 了。
+        // 会话中的按键改由 handleKeyEquivalent / handleKeyDown 匹配处理。
+        GlobalHotKey.shared.unregister()
+
         // 选择默认画布
         if let first = canvases.first {
             switch Prefs.screenMode {
@@ -362,6 +367,7 @@ final class SessionController: NSObject, NSMenuDelegate {
             return
         }
         SettingsWindowController.shared.adaptToSession()
+        GlobalHotKey.shared.registerCurrent()      // 恢复全局热键
         startPanel?.orderFrontRegardless()
         if let prev = previousApp, prev.bundleIdentifier != Bundle.main.bundleIdentifier {
             prev.activate(options: [])
@@ -659,6 +665,8 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     func handleKeyEquivalent(_ event: NSEvent) -> Bool {
         guard isActive, event.modifierFlags.contains(.command) else { return false }
+        // 全局热键在会话中已注销，这里接管它，否则无法用热键结束会话
+        if Prefs.hotKeySpec.matches(event) { finish(); return true }
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         switch key {
         case "z":
@@ -683,6 +691,8 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     func handleKeyDown(_ event: NSEvent) -> Bool {
         guard isActive else { return false }
+        // 功能键（F1–F20）不经过 performKeyEquivalent，在这里匹配
+        if Prefs.hotKeySpec.matches(event) { finish(); return true }
         let shift = event.modifierFlags.contains(.shift)
         let cmd = event.modifierFlags.contains(.command)
 

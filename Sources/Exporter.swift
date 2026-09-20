@@ -278,128 +278,114 @@ enum ScreenPermission {
     static func ensure() -> Bool {
         guard !ScreenCapture.hasPermission else { return true }
 
-        // 这里**故意不调用** CGRequestScreenCaptureAccess()。
-        // 它在 macOS 15+ 上是非阻塞的：弹出系统自带的「想要录制此电脑的屏幕」授权框后
-        // 立刻返回 false，于是紧接着又弹出下面这个引导框 —— 用户同时看到两个弹窗。
-        // 应用在首次请求后已经登记进「屏幕录制」列表，给一处引导就够了；
-        // 万一列表里没有，文案里也写了用左下角的「+」手动添加。
-        var openedOnce = false
+        // 这里**故意不调用** CGRequestScreenCaptureAccess()：
+        // 它在 macOS 15+ 上非阻塞，弹完系统自带的授权框后立刻返回 false，
+        // 会和下面这个引导框同时出现（用户看到两个弹窗）。
+        let a = NSAlert()
+        a.alertStyle = .informational
+        a.messageText = LS("\(Brand.name) benötigt die Berechtigung „Bildschirmaufnahme“",
+                           "\(Brand.name) needs Screen Recording permission",
+                           "\(Brand.name) 需要「屏幕录制」权限",
+                           "\(Brand.name) 需要「螢幕錄製」權限")
+        let steps = LS("""
+        \(Brand.name) muss den Bildschirm einfrieren, um darauf zeichnen zu können,
+        dafür ist die Berechtigung „Bildschirmaufnahme“ erforderlich.
 
-        while !ScreenCapture.hasPermission {
-            NSApp.activate(ignoringOtherApps: true)
-            let a = NSAlert()
-            a.alertStyle = .informational
-            a.messageText = LS("\(Brand.name) benötigt die Berechtigung „Bildschirmaufnahme“",
-                               "\(Brand.name) needs Screen Recording permission",
-                               "\(Brand.name) 需要「屏幕录制」权限",
-                               "\(Brand.name) 需要「螢幕錄製」權限")
-            let steps = LS("""
-            \(Brand.name) muss den Bildschirm einfrieren, um darauf zeichnen zu können,
-            dafür ist die Berechtigung „Bildschirmaufnahme“ erforderlich.
+        1. Klicken Sie unten auf „Systemeinstellungen öffnen“
+        2. Aktivieren Sie unter „Datenschutz & Sicherheit › Bildschirmaufnahme“ den Schalter für \(Brand.name)
+           (fehlt \(Brand.name) in der Liste, mit „+“ unten links hinzufügen)
+        3. Klicken Sie danach erneut auf „Start“
 
-            1. Klicken Sie unten auf „Systemeinstellungen öffnen“
-            2. Aktivieren Sie unter „Datenschutz & Sicherheit › Bildschirmaufnahme“ den Schalter für \(Brand.name)
-               (fehlt \(Brand.name) in der Liste, mit „+“ unten links hinzufügen)
-            3. Das war alles – sobald die Berechtigung erteilt ist, geht es automatisch weiter
+        Falls es trotzdem nicht greift, verwenden Sie „Beenden und neu öffnen“.
+        """, """
+        \(Brand.name) must freeze the screen to annotate it, so it needs
+        Screen Recording permission.
 
-            Falls es trotzdem nicht greift, verwenden Sie „Beenden und neu öffnen“.
-            """, """
-            \(Brand.name) must freeze the screen to annotate it, so it needs
-            Screen Recording permission.
+        1. Click "Open System Settings" below
+        2. In "Privacy & Security › Screen Recording", switch \(Brand.name) on
+           (if \(Brand.name) is not listed, add it with the "+" button at the bottom left)
+        3. Then click "Start" again
 
-            1. Click "Open System Settings" below
-            2. In "Privacy & Security › Screen Recording", switch \(Brand.name) on
-               (if \(Brand.name) is not listed, add it with the "+" button at the bottom left)
-            3. That is all — it continues automatically once permission is granted
+        If it still does not take effect, use "Quit and Reopen".
+        """, """
+        \(Brand.name) 需要先冻结屏幕才能标注，所以必须获得屏幕录制权限。
 
-            If it still does not take effect, use "Quit and Reopen".
-            """, """
-            \(Brand.name) 需要先冻结屏幕才能标注，所以必须获得屏幕录制权限。
+        1. 点击下面的「打开系统设置」
+        2. 在「隐私与安全性 › 屏幕录制」列表里把 \(Brand.name) 打开
+           （如果列表里没有 \(Brand.name)，点左下角的「+」手动添加）
+        3. 授权完成后，重新点一次「开始」
 
-            1. 点击下面的「打开系统设置」
-            2. 在「隐私与安全性 › 屏幕录制」列表里把 \(Brand.name) 打开
-               （如果列表里没有 \(Brand.name)，点左下角的「+」手动添加）
-            3. 就这些 —— 授权成功后会自动继续，不需要再点任何按钮
+        如果仍然不生效，请用「退出并重新打开」。
+        """, """
+        \(Brand.name) 需要先凍結螢幕才能標註，所以必須獲得螢幕錄製權限。
 
-            如果仍然不生效，请用「退出并重新打开」。
-            """, """
-            \(Brand.name) 需要先凍結螢幕才能標註，所以必須獲得螢幕錄製權限。
+        1. 按一下下面的「開啟系統設定」
+        2. 在「隱私與安全性 › 螢幕錄製」列表裡把 \(Brand.name) 開啟
+           （如果列表裡沒有 \(Brand.name)，點左下角的「+」手動加入）
+        3. 授權完成後，重新按一次「開始」
 
-            1. 按一下下面的「開啟系統設定」
-            2. 在「隱私與安全性 › 螢幕錄製」列表裡把 \(Brand.name) 開啟
-               （如果列表裡沒有 \(Brand.name)，點左下角的「+」手動加入）
-            3. 就這樣 —— 授權成功後會自動繼續，不需要再按任何按鈕
+        如果仍然不生效，請用「結束並重新開啟」。
+        """)
+        let staleHint = LS("""
+        Falls \(Brand.name) in der Liste BEREITS aktiviert ist und trotzdem nicht funktioniert,
+        gehört dieser Eintrag zu einer älteren Version (die App ist ad-hoc signiert, ihre
+        Signatur ändert sich bei jedem Neubau). Bitte:
+          · \(Brand.name) in der Liste auswählen und mit „−“ entfernen
+          · anschließend erneut auf „Start“ klicken
+        """, """
+        If \(Brand.name) is ALREADY switched on in the list but still does not work, that entry
+        belongs to an older build (this app is ad-hoc signed, so its signature changes on
+        every rebuild). Please:
+          - select \(Brand.name) in the list and remove it with the "-" button
+          - then click Start again
+        """, """
+        如果列表里 \(Brand.name) 的开关【已经是打开状态】却仍然无效，说明这条授权记录绑定的是
+        旧版本程序（本程序是 ad-hoc 签名，重新编译后签名指纹会变）。请：
+          · 在列表里选中 \(Brand.name)，点左下角的「−」删除这条记录
+          · 然后重新点一次「开始」
+        """, """
+        如果列表裡 \(Brand.name) 的開關【已經是開啟狀態】卻仍然無效，說明這條授權記錄綁定的是
+        舊版本程式（本程式是 ad-hoc 簽名，重新編譯後簽名指紋會變）。請：
+          · 在列表裡選中 \(Brand.name)，點左下角的「−」刪除這條記錄
+          · 然後重新按一次「開始」
+        """)
+        a.informativeText = steps + "\n\n" + staleHint
+        a.addButton(withTitle: LS("Systemeinstellungen öffnen", "Open System Settings", "打开系统设置", "開啟系統設定"))
+        a.addButton(withTitle: LS("Beenden und neu öffnen", "Quit and Reopen", "退出并重新打开", "結束並重新開啟"))
+        a.addButton(withTitle: LS("Abbrechen", "Cancel", "取消", "取消"))
+        a.window.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 6)
 
-            如果仍然不生效，請用「結束並重新開啟」。
-            """)
-            let staleHint = LS("""
-            Falls \(Brand.name) in der Liste BEREITS aktiviert ist und trotzdem nicht funktioniert,
-            gehört dieser Eintrag zu einer älteren Version (die App ist ad-hoc signiert, ihre
-            Signatur ändert sich bei jedem Neubau). Bitte:
-              · \(Brand.name) in der Liste auswählen und mit „−“ entfernen
-              · anschließend erneut auf „Start“ klicken
-            """, """
-            If \(Brand.name) is ALREADY switched on in the list but still does not work, that entry
-            belongs to an older build (this app is ad-hoc signed, so its signature changes on
-            every rebuild). Please:
-              - select \(Brand.name) in the list and remove it with the "-" button
-              - then click Start again
-            """, """
-            如果列表里 \(Brand.name) 的开关【已经是打开状态】却仍然无效，说明这条授权记录绑定的是
-            旧版本程序（本程序是 ad-hoc 签名，重新编译后签名指纹会变）。请：
-              · 在列表里选中 \(Brand.name)，点左下角的「−」删除这条记录
-              · 然后重新点一次「开始」
-            """, """
-            如果列表裡 \(Brand.name) 的開關【已經是開啟狀態】卻仍然無效，說明這條授權記錄綁定的是
-            舊版本程式（本程式是 ad-hoc 簽名，重新編譯後簽名指紋會變）。請：
-              · 在列表裡選中 \(Brand.name)，點左下角的「−」刪除這條記錄
-              · 然後重新按一次「開始」
-            """)
-            let shown = openedOnce
-                ? LS("Die Systemeinstellungen wurden geöffnet. Schalten Sie den Eintrag ein – es geht automatisch weiter.\n\n",
-                     "System Settings has been opened. Switch the entry on — it continues automatically.\n\n",
-                     "已为你打开系统设置。把开关打开即可，程序会自动继续。\n\n",
-                     "已為你開啟系統設定。把開關打開即可，程式會自動繼續。\n\n")
-                : ""
-            a.informativeText = shown + steps + "\n\n" + staleHint
-            a.addButton(withTitle: LS("Systemeinstellungen öffnen", "Open System Settings", "打开系统设置", "開啟系統設定"))
-            a.addButton(withTitle: LS("Beenden und neu öffnen", "Quit and Reopen", "退出并重新打开", "結束並重新開啟"))
-            a.addButton(withTitle: LS("Abbrechen", "Cancel", "取消", "取消"))
-            a.window.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 6)
-
-            // 自动轮询：用户在系统设置里打开开关后自动继续，不必手动点「重试」。
-            // NSAlert.runModal 跑的是模态 run loop，定时器会被正常调度。
-            var granted = false
-            // 必须显式注册到 .modalPanel：NSAlert.runModal() 跑的是模态 run loop，
-            // 而 Timer.scheduledTimer 只挂到 .default 模式 —— 那样定时器永远不会触发。
-            let poll = Timer(timeInterval: 0.5, repeats: true) { t in
-                guard !granted, ScreenCapture.hasPermission else { return }
-                granted = true
-                t.invalidate()
-                NSApp.stopModal(withCode: .alertFirstButtonReturn)
-                a.window.orderOut(nil)
-            }
-            RunLoop.current.add(poll, forMode: .modalPanel)
-            RunLoop.current.add(poll, forMode: .default)
-            let resp = a.runModal()
-            poll.invalidate()
+        // 弹窗停留期间轮询权限：用户若在系统设置里打开开关，自动继续。
+        // 必须注册到 .modalPanel —— NSAlert.runModal() 跑的是模态 run loop，
+        // 而 Timer.scheduledTimer 只挂 .default 模式，那样定时器永远不会触发。
+        var granted = false
+        let poll = Timer(timeInterval: 0.5, repeats: true) { t in
+            guard !granted, ScreenCapture.hasPermission else { return }
+            granted = true
+            t.invalidate()
+            NSApp.stopModal(withCode: .alertFirstButtonReturn)
             a.window.orderOut(nil)
-
-            if granted || ScreenCapture.hasPermission { return true }
-
-            switch resp {
-            case .alertFirstButtonReturn:
-                openSettings()
-                openedOnce = true
-                continue
-            case .alertSecondButtonReturn:
-                // macOS 对已授权过的进程会缓存判定，此时必须重启进程才会生效
-                relaunch()
-                return false
-            default:
-                return false
-            }
         }
-        return true
+        RunLoop.current.add(poll, forMode: .modalPanel)
+        RunLoop.current.add(poll, forMode: .default)
+
+        let resp = a.runModal()
+        poll.invalidate()
+        a.window.orderOut(nil)
+
+        if granted || ScreenCapture.hasPermission { return true }
+
+        // 关键：这里**绝不重新弹窗**。
+        // 之前写成 continue 回到 while 顶部，导致点「打开系统设置」后弹窗立刻重开，
+        // 和系统设置互相刷屏形成死循环（用户看到的现象）。
+        switch resp {
+        case .alertFirstButtonReturn:
+            openSettings()          // 打开系统设置后关掉弹窗，让路给用户操作
+        case .alertSecondButtonReturn:
+            relaunch()              // macOS 缓存了旧判定时必须重启进程
+        default:
+            break
+        }
+        return false
     }
 }

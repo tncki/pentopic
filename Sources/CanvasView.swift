@@ -334,6 +334,8 @@ final class CanvasView: NSView {
     /// 本次拖动是否被拒绝（例如空白纸上打码）。mouseDown 里 return 只能挡住"按下"，
     /// 后面的 mouseDragged / mouseUp 照样会跑，所以需要一个标记贯穿整次拖动。
     private var dragRejected = false
+    /// 是否正在拖动。ESC 需要据此决定"取消这次拖动"还是"结束标注"。
+    private(set) var isDragging = false
 
     init(state: CanvasState, controller: SessionController) {
         self.state = state
@@ -563,6 +565,7 @@ final class CanvasView: NSView {
         guard let c = controller else { return }
         window?.makeFirstResponder(self)
         dragRejected = false
+        isDragging = false
         let p = pt(event)
         dragStart = p
         dragCurrent = p
@@ -594,6 +597,7 @@ final class CanvasView: NSView {
 
         switch c.tool {
         case .pen, .eraser:
+            isDragging = true
             livePoints = [p]
             if c.tool == .eraser {
                 // 橡皮擦直接作用于图层（.clear 混合），绝不能作为 live 画到视图上
@@ -615,6 +619,7 @@ final class CanvasView: NSView {
                 return
             }
             live = Stroke(shape: .line(p, p), color: strokeColor, width: w)
+            isDragging = true
             needsDisplay = true
         case .number:
             commit(Stroke(shape: .number(state.nextNumber, p, w * 2.4 + 14),
@@ -735,6 +740,7 @@ final class CanvasView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         guard let c = controller else { return }
+        isDragging = false
         if dragRejected { dragRejected = false; live = nil; needsDisplay = true; return }
         if state.isZoomed { lastPan = nil; return }
 
@@ -781,9 +787,14 @@ final class CanvasView: NSView {
     }
 
     private func commit(_ s: Stroke) {
-        state.layer.apply(s)
         state.strokes.append(s)
         state.undoneStrokes.removeAll()      // 新操作让重做栈失效
+        if case .spotlight = s.shape {
+            // 新的聚焦要让旧的失效，必须整体重放（增量 apply 撤不掉旧的那一层压暗）
+            state.rebuild()
+        } else {
+            state.layer.apply(s)
+        }
         live = nil
         livePoints = []
         state.invalidateZoomCache()
@@ -895,6 +906,16 @@ final class CanvasView: NSView {
         }
         if controller?.handleKeyEquivalent(event) == true { return true }
         return super.performKeyEquivalent(with: event)
+    }
+
+    /// 取消进行中的拖动（ESC）。不结束会话，也不提交任何笔画。
+    func cancelDrag() {
+        guard isDragging else { return }
+        isDragging = false
+        dragRejected = true          // 让紧随其后的 mouseUp 不再提交
+        live = nil
+        livePoints = []
+        needsDisplay = true
     }
 
     func moveRegionBy(dx: CGFloat, dy: CGFloat) {

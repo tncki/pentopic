@@ -722,6 +722,11 @@ final class SessionController: NSObject, NSMenuDelegate {
             if tool == .region { RegionCoordDialog.show(controller: self); return true }
             return false
         case 53: // ESC
+            // 拖动中按 ESC 只取消这次拖动 —— 不能直接结束会话，那会把已有标注全丢掉
+            if views.contains(where: { $0.isDragging }) {
+                views.forEach { $0.cancelDrag() }
+                return true
+            }
             if let st = activeCanvas, st.isZoomed { views.forEach { $0.enterZoom(1, center: nil) }; applyTool(previousTool, silent: false); return true }
             finish(); return true
         case 123, 124, 125, 126: // 方向键移动选区
@@ -770,7 +775,12 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     func showContextMenu(at point: CGPoint, in view: CanvasView, event: NSEvent) {
         let menu = buildMenu()
+        // 放大镜是 screenSaver+2 的浮动面板，层级比 NSMenu 的弹出层高得多，
+        // 不收起就会盖住右键菜单。
+        let magWasVisible = magnifier?.isVisible ?? false
+        magnifier?.orderOut(nil)
         NSMenu.popUpContextMenu(menu, with: event, for: view)
+        if magWasVisible, tool == .magnifier { magnifier?.orderFrontRegardless() }
     }
 
     func buildMenu() -> NSMenu {

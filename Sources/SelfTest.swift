@@ -490,6 +490,121 @@ enum SelfTest {
         }
         sc.clearAll(); pump(0.1)
 
+        // ---- 4e. 序号居中（像素级验证）----
+        // 用"到圆心的距离"筛出圆内的白色像素 = 数字本身。
+        // 早先版本用"红色像素包围盒"定位圆形，结果把整个采样框都算进去了，
+        // 得到一个假通过的 0.0 偏差。
+        log("")
+        log("[4e] 序号居中（像素级）")
+        sc.clearAll(); sc.setBackground(.white); pump(0.25)
+        sc.setPenSize(3); sc.setSwatch(1)
+        sc.setTool(.number)
+        let numCenter = CGPoint(x: 600, y: 400)
+        click(numCenter); pump(0.25)
+        if let img = st.composeCG(region: nil) {
+            let scale = st.scale
+            let half: CGFloat = 90
+            let px = CGRect(x: (numCenter.x - half) * scale, y: (numCenter.y - half) * scale,
+                            width: half * 2 * scale, height: half * 2 * scale).integral
+            let w = Int(px.width), h = Int(px.height)
+            var buf = [UInt8](repeating: 0, count: w * h * 4)
+            let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+            if let sub = img.cropping(to: px),
+               let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8,
+                                   bytesPerRow: w * 4, space: cs,
+                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                ctx.interpolationQuality = .none
+                ctx.draw(sub, in: CGRect(x: 0, y: 0, width: w, height: h))
+                func rgb(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+                    let o = (y * w + x) * 4
+                    return (Int(buf[o]), Int(buf[o+1]), Int(buf[o+2]))
+                }
+                // 1) 找红色圆形（圆盘）的包围盒 → 圆心与半径
+                var minX = w, maxX = -1, minY = h, maxY = -1
+                for y in 0..<h { for x in 0..<w {
+                    let (r, g, b) = rgb(x, y)
+                    if r > 150, g < 90, b < 90 {
+                        minX = min(minX, x); maxX = max(maxX, x)
+                        minY = min(minY, y); maxY = max(maxY, y)
+                    }
+                } }
+                if maxX < 0 {
+                    check("找到序号圆形", false, "画面里没有红色圆形")
+                } else {
+                    let cx = Double(minX + maxX) / 2, cy = Double(minY + maxY) / 2
+                    let radius = Double(max(maxX - minX, maxY - minY)) / 2
+                    check("找到序号圆形", true, String(format: "直径 %.0f px", radius * 2))
+                    // 2) 圆内（半径 85% 以内）的白色像素 = 数字
+                    var tMinX = w, tMaxX = -1, tMinY = h, tMaxY = -1, count = 0
+                    for y in 0..<h { for x in 0..<w {
+                        let dx = Double(x) - cx, dy = Double(y) - cy
+                        guard (dx * dx + dy * dy).squareRoot() < radius * 0.85 else { continue }
+                        let (r, g, b) = rgb(x, y)
+                        if r > 235, g > 235, b > 235 {
+                            tMinX = min(tMinX, x); tMaxX = max(tMaxX, x)
+                            tMinY = min(tMinY, y); tMaxY = max(tMaxY, y)
+                            count += 1
+                        }
+                    } }
+                    check("数字画在圆内", count > 50, "文字像素 \(count) 个")
+                    if count > 0 {
+                        let tcx = Double(tMinX + tMaxX) / 2, tcy = Double(tMinY + tMaxY) / 2
+                        log(String(format: "  圆心 (%.1f, %.1f)  数字中心 (%.1f, %.1f)  半径 %.1f px", cx, cy, tcx, tcy, radius))
+                        check("序号水平居中", abs(tcx - cx) <= 2.0, String(format: "偏移 %.1f px", tcx - cx))
+                        check("序号垂直居中", abs(tcy - cy) <= 2.0, String(format: "偏移 %.1f px", tcy - cy))
+                        // 数字不能顶到圆的边缘（早先的 bug 就是数字偏下溢出圆外）
+                        check("数字未溢出圆形", Double(tMaxY) < cy + radius, String(format: "底部 %.1f < %.1f", Double(tMaxY), cy + radius))
+                    }
+                }
+            }
+        }
+        sc.clearAll(); sc.setBackground(.currentScreen); pump(0.25)
+        sc.setPenSize(1); sc.setSwatch(0); sc.setTool(.pen)
+
+        // ---- 4f. 聚焦不累积 + ESC 取消拖动 ----
+        log("")
+        log("[4f] 聚焦不累积 / ESC 取消拖动")
+
+        // 聚焦：先后框两处，非聚焦区的亮度不应一次比一次暗
+        sc.clearAll(); sc.setBackground(.currentScreen); pump(0.25)
+        let spotProbe = CGPoint(x: 1300, y: 850)      // 两次聚焦区之外
+        func probeColor() -> String? {
+            guard let cg = st.composeCG(region: nil) else { return nil }
+            return PixelSampler.color(of: cg, at: CGPoint(x: spotProbe.x * st.scale, y: spotProbe.y * st.scale))?.hexString
+        }
+        let original = probeColor()
+        sc.setTool(.spotlight)
+        drag([CGPoint(x: 100, y: 100), CGPoint(x: 400, y: 350)]); pump(0.2)
+        let afterFirst = probeColor()
+        drag([CGPoint(x: 600, y: 400), CGPoint(x: 900, y: 650)]); pump(0.2)
+        let afterSecond = probeColor()
+        log("  非聚焦区颜色: 原始 \(original ?? "?") → 第一次聚焦后 \(afterFirst ?? "?") → 第二次后 \(afterSecond ?? "?")")
+        check("第一次聚焦确实压暗了非聚焦区", afterFirst != original,
+              "\(original ?? "?") → \(afterFirst ?? "?")")
+        check("第二次聚焦不会继续加深（不累积）", afterSecond == afterFirst,
+              "\(afterFirst ?? "?") vs \(afterSecond ?? "?")")
+
+        // ESC 取消拖动：拖到一半取消，不应留下任何笔画
+        sc.clearAll(); pump(0.15)
+        sc.setTool(.pen); sc.setPenSize(2); sc.setSwatch(1)
+        let strokesBeforeCancel = st.strokes.count
+        if let down = event(.leftMouseDown, CGPoint(x: 300, y: 300)) { view.mouseDown(with: down) }
+        if let move = event(.leftMouseDragged, CGPoint(x: 500, y: 400)) { view.mouseDragged(with: move) }
+        check("拖动中被标记为拖动状态", view.isDragging)
+        view.cancelDrag()                              // 等价于拖动中按 ESC
+        check("取消后不再处于拖动状态", !view.isDragging)
+        if let up = event(.leftMouseUp, CGPoint(x: 500, y: 400)) { view.mouseUp(with: up) }
+        pump(0.1)
+        check("取消的拖动没有留下笔画", st.strokes.count == strokesBeforeCancel,
+              "笔画数 \(strokesBeforeCancel) → \(st.strokes.count)")
+        check("会话仍在进行（ESC 取消拖动不会结束标注）", SessionController.shared.isActive)
+
+        // 对照：正常完成的拖动应当留下笔画
+        drag([CGPoint(x: 300, y: 300), CGPoint(x: 500, y: 400)]); pump(0.1)
+        check("正常完成的拖动会留下笔画", st.strokes.count == strokesBeforeCancel + 1,
+              "笔画数 \(strokesBeforeCancel) → \(st.strokes.count)")
+        sc.clearAll(); pump(0.15)
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

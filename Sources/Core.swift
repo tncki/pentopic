@@ -434,10 +434,17 @@ enum ShapeRenderer {
         let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
         let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attrs))
-        let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+
+        // 必须用 .useGlyphPathBounds —— 它是**字形轮廓**的包围盒。
+        // 踩过的两个坑：
+        //  · .useOpticalBounds 返回的其实是整个行盒（y 从降部到升部、x 是完整前进宽度），
+        //    用它定位会把基线压到圆心下方约 28pt，数字直接溢出圆外。
+        //  · 用前进宽度居中也不行：数字 "1" 的墨迹中心在 7.20，前进宽度中心在 8.51，
+        //    实测偏 3.5 像素。
+        // 轮廓包围盒对任何字形都精确：把它的中心对准圆心即可。
+        let ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
         ctx.textMatrix = .identity
-        ctx.translateBy(x: center.x - bounds.width / 2 - bounds.minX,
-                        y: center.y + bounds.height / 2 - bounds.minY)
+        ctx.translateBy(x: center.x - ink.midX, y: center.y + ink.midY)
         ctx.scaleBy(x: 1, y: -1)
         ctx.textPosition = .zero
         CTLineDraw(line, ctx)
@@ -585,7 +592,16 @@ final class AnnotationLayer {
 
     func rebuild(from strokes: [Stroke]) {
         clear()
-        for s in strokes { apply(s) }
+        // 聚焦高亮只让**最后一个**生效。
+        // 否则每框一次就叠一层 55% 的黑，画面会一层层变暗 —— 用户看到的"累积变暗"。
+        var lastSpotlight = -1
+        for (i, s) in strokes.enumerated() {
+            if case .spotlight = s.shape { lastSpotlight = i }
+        }
+        for (i, s) in strokes.enumerated() {
+            if case .spotlight = s.shape, i != lastSpotlight { continue }
+            apply(s)
+        }
     }
 
     func snapshot() -> CGImage? { ctx.makeImage() }

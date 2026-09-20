@@ -216,6 +216,25 @@ do {
     }
 }
 
+// ---------------------------------------------------------------- 1h. 序号居中放大检查
+do {
+    if let scr = (NSScreen.main ?? NSScreen.screens.first),
+       let st = CanvasState(screen: scr, captured: nil) {
+        st.background = BackgroundKind.white
+        // 大中小三种直径各画一个，方便肉眼判断居中
+        for (i, d) in [CGFloat(60), 100, 160].enumerated() {
+            let c = CGPoint(x: 160 + CGFloat(i) * 220, y: 160)
+            let stk = Stroke(shape: .number(i + 1, c, d), color: Palette.red, width: 6)
+            st.layer.apply(stk); st.strokes.append(stk)
+        }
+        if let cg = st.composeCG(region: CGRect(x: 40, y: 40, width: 640, height: 240)) {
+            let url = outDir.appendingPathComponent("11-number-centering.png")
+            try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: url)
+            print("wrote \(url.path)  \(cg.width)x\(cg.height)")
+        }
+    }
+}
+
 // ---------------------------------------------------------------- 2. 全部工具
 guard let screen = NSScreen.main ?? NSScreen.screens.first else {
     print("no screen"); exit(1)

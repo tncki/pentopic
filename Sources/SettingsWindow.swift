@@ -47,7 +47,11 @@ final class SettingsModel: ObservableObject {
         Prefs.screenMode = ScreenMode(rawValue: screenMode) ?? .mouse
         Prefs.buttonW = CGFloat(buttonW)
         Prefs.buttonH = CGFloat(buttonH)
+        // 之前这里漏了 —— load() 读了但 save() 从没写回，导致「选择…」改的目录点确定就丢
+        Prefs.setScreenshotFolder(URL(fileURLWithPath: (screenshotFolder as NSString).expandingTildeInPath))
+        Prefs.setEmailFolder(URL(fileURLWithPath: (emailFolder as NSString).expandingTildeInPath))
         Prefs.extraColors = extraColors
+        Prefs.ensureFolders()
         if hotKey != Prefs.hotKeyCode {
             Prefs.hotKeyCode = hotKey
             GlobalHotKey.shared.registerCurrent()
@@ -133,14 +137,19 @@ struct SettingsView: View {
                     group(LS("Zusätzliche Farben (max. 10)", "Additional colors (max 10)", "附加颜色（最多 10 个）", "其他顏色（最多 10 個）")) {
                         HStack(spacing: 8) {
                             ForEach(Array(m.extraColors.enumerated()), id: \.offset) { idx, hex in
-                                ColorPicker("", selection: Binding(
-                                    get: { Color(nsColor: NSColor(hex: hex) ?? .red) },
-                                    set: { newColor in
-                                        let ns = NSColor(newColor)
-                                        if idx < m.extraColors.count { m.extraColors[idx] = ns.hexString }
-                                    }), supportsOpacity: false)
-                                .labelsHidden()
-                                .frame(width: 34)
+                                Button {
+                                    ColorPanelBridge.shared.pick(from: hex) { newHex in
+                                        if idx < m.extraColors.count { m.extraColors[idx] = newHex }
+                                    }
+                                } label: {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color(nsColor: NSColor(hex: hex) ?? .red))
+                                        .frame(width: 30, height: 22)
+                                        .overlay(RoundedRectangle(cornerRadius: 4)
+                                            .stroke(Color.black.opacity(0.35), lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                                .help(LS("Farbe wählen", "Choose colour", "选择颜色", "選擇顏色"))
                             }
                             if m.extraColors.count < 10 {
                                 Button {
@@ -207,9 +216,18 @@ struct SettingsView: View {
         .background(Color(NSColor.windowBackgroundColor))
     }
 
-    private var about: some View {
+    var about: some View {   // internal：供离屏预览单独渲染
         VStack(alignment: .leading, spacing: 4) {
             Text(LS("Über", "About", "关于", "關於")).font(.system(size: 12, weight: .semibold))
+            Text("\(Brand.name) \(Brand.version)")
+                .font(.system(size: 11, weight: .medium))
+            Text(Brand.copyright)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(LS("Lizenz: MIT", "Licence: MIT", "许可证：MIT", "授權條款：MIT"))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
             Text(LS("""
             Unabhängige macOS-Anwendung für Bildschirm-Annotationen.
             Inspiriert von \(Brand.upstreamName) 1.8 von \(Brand.upstreamAuthor) — ohne Verbindung zum Original.
@@ -287,6 +305,47 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - 附加颜色：自己管理系统颜色面板
+//
+// 原先用 SwiftUI 的 ColorPicker，它内部是 NSColorWell + 共享的 NSColorPanel：
+//   · NSColorPanel 是浮动面板，**不会随「信息与设置」窗口关闭而消失**，
+//     会一直遗留在屏幕上 —— 用户看到的现象就是"点开始先蹦出一个颜色面板"
+//   · 取色经过 SwiftUI Binding 转发，链路不可控、也不便排查
+// 改为自己持有 NSColorPanel，明确控制打开与关闭，取色走 target/action 直达。
+final class ColorPanelBridge: NSObject {
+    static let shared = ColorPanelBridge()
+
+    private var onPick: ((String) -> Void)?
+    private var active = false
+
+    func pick(from hex: String, onPick: @escaping (String) -> Void) {
+        self.onPick = onPick
+        let panel = NSColorPanel.shared
+        panel.setTarget(self)
+        panel.setAction(#selector(colorChanged(_:)))
+        panel.showsAlpha = false          // 附加颜色都是不透明的
+        panel.isContinuous = true
+        panel.color = NSColor(hex: hex) ?? .red
+        NSApp.activate(ignoringOtherApps: true)
+        panel.orderFront(nil)
+        active = true
+    }
+
+    @objc private func colorChanged(_ sender: NSColorPanel) {
+        onPick?(sender.color.hexString)
+    }
+
+    /// 设置窗口关闭时必须调用，否则颜色面板会遗留在屏幕上
+    func dismiss() {
+        guard active else { return }
+        active = false
+        onPick = nil
+        let panel = NSColorPanel.shared
+        panel.setTarget(nil)
+        panel.orderOut(nil)
+    }
+}
+
 final class SettingsWindowController {
     static let shared = SettingsWindowController()
     private var window: NSWindow?
@@ -296,9 +355,7 @@ final class SettingsWindowController {
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
         model.load()
         let view = SettingsView(m: model) { [weak self] in
-            self?.window?.close()
-            self?.window = nil
-            SessionController.shared.makeCanvasKey()
+            self?.closeWindow()
         }
         let hosting = NSHostingView(rootView: view)
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
@@ -311,5 +368,18 @@ final class SettingsWindowController {
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window = w
+
+        // 点红叉关闭时也要收掉颜色面板
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification,
+                                               object: w, queue: .main) { [weak self] _ in
+            self?.closeWindow()
+        }
+    }
+
+    private func closeWindow() {
+        ColorPanelBridge.shared.dismiss()
+        window?.close()
+        window = nil
+        SessionController.shared.makeCanvasKey()
     }
 }

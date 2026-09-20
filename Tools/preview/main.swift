@@ -75,6 +75,49 @@ do {
     renderView(h, named: "00-settings-\(L.lang.rawValue).png")
 }
 
+// ---------------------------------------------------------------- 1c. 诊断：设置视图与颜色面板
+do {
+    print("\n[诊断] 创建 SettingsView 之前 NSColorPanel.isVisible = \(NSColorPanel.shared.isVisible)")
+    let sm2 = SettingsModel()
+    sm2.load()
+    let sv2 = SettingsView(m: sm2, onClose: {})
+    let h2 = NSHostingView(rootView: sv2)
+    let w2 = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+                      styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    w2.contentView = h2
+    h2.layoutSubtreeIfNeeded()
+    print("[诊断] 创建并放入窗口之后 NSColorPanel.isVisible = \(NSColorPanel.shared.isVisible)")
+    print("[诊断] 窗口里是否有 NSColorWell 子视图 = \(h2.subviews.count) 个直接子视图")
+
+    // 额外颜色：模型 → Prefs → Palette 链路
+    sm2.extraColors = ["#FF7A00", "#00C2A8"]
+    sm2.save()
+    print("[验证] 附加颜色保存后 Prefs.extraColors = \(Prefs.extraColors)")
+    print("[验证] Palette.all.count = \(Palette.all.count)  (标准 10 + 附加 \(Palette.extra.count))")
+
+    // 文件夹路径：save() 是否真的写回
+    let tmpA = NSTemporaryDirectory() + "pofix-A", tmpB = NSTemporaryDirectory() + "pofix-B"
+    sm2.screenshotFolder = tmpA
+    sm2.emailFolder = tmpB
+    sm2.save()
+    print("[验证] 截图目录写回 = \(Prefs.screenshotFolder.path == tmpA ? "OK" : "失败(\(Prefs.screenshotFolder.path))")")
+    print("[验证] 邮件目录写回 = \(Prefs.emailFolder.path == tmpB ? "OK" : "失败(\(Prefs.emailFolder.path))")")
+    print("[验证] 目录已自动创建 = \(FileManager.default.fileExists(atPath: tmpA) ? "OK" : "失败")")
+
+    // 版权声明
+    print("[验证] Brand.version   = \(Brand.version)")
+    print("[验证] Brand.copyright = \(Brand.copyright)")
+
+    // 单独渲染「关于」区块
+    let aboutHost = NSHostingView(rootView: sv2.about)
+    aboutHost.frame = NSRect(x: 0, y: 0, width: 520, height: 220)
+    renderView(aboutHost, named: "02-about-\(L.lang.rawValue).png")
+
+    Prefs.extraColors = []
+    Prefs.setScreenshotFolder(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Pointofix/Screenshots"))
+    print("")
+}
+
 // ---------------------------------------------------------------- 2. 全部工具
 guard let screen = NSScreen.main ?? NSScreen.screens.first else {
     print("no screen"); exit(1)

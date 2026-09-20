@@ -55,6 +55,11 @@ enum Brand {
     }
     static var bundleID: String { Bundle.main.bundleIdentifier ?? "" }
 
+    /// 版权声明，取自 Info.plist（由 app.conf 的 COPYRIGHT 生成），保证与打包信息一致
+    static var copyright: String {
+        Bundle.main.object(forInfoDictionaryKey: "NSHumanReadableCopyright") as? String ?? ""
+    }
+
     /// 被致敬的原作（署名必须保留，但表述为"受其启发的独立实现"）
     static let upstreamName = "Pointofix"
     static let upstreamAuthor = "Thomas Gottfried EDV"

@@ -44,6 +44,7 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>POFPreview</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE_ID.preview</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
+  <key>NSHumanReadableCopyright</key><string>${COPYRIGHT:-}</string>
   <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST

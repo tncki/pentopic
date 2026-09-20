@@ -298,8 +298,17 @@ struct SettingsView: View {
                 p.canChooseDirectories = true
                 p.canChooseFiles = false
                 p.allowsMultipleSelection = false
-                p.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 6)
-                if p.runModal() == .OK, let u = p.url { set(u.path) }
+                p.canCreateDirectories = true
+                // 用 sheet 挂在设置窗口上：sheet 必然位于所属窗口之上，不受窗口层级影响。
+                // 之前用 runModal + 手动设 level，但会话期间设置窗口在 screenSaver+4，
+                // 面板会被压在下面看不见 —— 用户看到的就是"点了没反应"。
+                if let host = NSApp.keyWindow ?? NSApp.mainWindow {
+                    p.beginSheetModal(for: host) { resp in
+                        if resp == .OK, let u = p.url { set(u.path) }
+                    }
+                } else if p.runModal() == .OK, let u = p.url {
+                    set(u.path)
+                }
             }
         }
     }
@@ -321,6 +330,9 @@ final class ColorPanelBridge: NSObject {
     func pick(from hex: String, onPick: @escaping (String) -> Void) {
         self.onPick = onPick
         let panel = NSColorPanel.shared
+        // NSColorPanel 是 .floating 层级。会话期间设置窗口在 screenSaver+4，
+        // 不抬高的话颜色面板会被压在设置窗口下面，表现为"点了没反应"。
+        panel.level = NSWindow.Level(rawValue: (NSApp.keyWindow?.level.rawValue ?? 0) + 2)
         panel.setTarget(self)
         panel.setAction(#selector(colorChanged(_:)))
         panel.showsAlpha = false          // 附加颜色都是不透明的
@@ -333,6 +345,12 @@ final class ColorPanelBridge: NSObject {
 
     @objc private func colorChanged(_ sender: NSColorPanel) {
         onPick?(sender.color.hexString)
+    }
+
+    /// 跟随设置窗口的层级，保证颜色面板始终在它上面
+    func updateLevel(above level: NSWindow.Level) {
+        guard active else { return }
+        NSColorPanel.shared.level = NSWindow.Level(rawValue: level.rawValue + 2)
     }
 
     /// 设置窗口关闭时必须调用，否则颜色面板会遗留在屏幕上
@@ -363,7 +381,9 @@ final class SettingsWindowController {
         w.title = LS("\(Brand.name) – Info und Einstellungen", "\(Brand.name) – Info and settings", "\(Brand.name) – 信息与设置", "\(Brand.name) – 資訊與設定")
         w.contentView = hosting
         w.isReleasedWhenClosed = false
-        w.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 4)
+        w.level = SessionController.shared.isActive
+            ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 4)
+            : .normal
         w.center()
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -376,10 +396,29 @@ final class SettingsWindowController {
         }
     }
 
+    private var isClosing = false
+
     private func closeWindow() {
+        // window.close() 会同步发出 willCloseNotification，而观察者又调用本方法 ——
+        // 之前没有防护，window 在 close() 之后才置空，于是无限递归导致闪退。
+        guard !isClosing else { return }
+        isClosing = true
         ColorPanelBridge.shared.dismiss()
-        window?.close()
-        window = nil
+        let w = window
+        window = nil            // 先置空，回调再进来时直接返回
+        w?.close()
+        isClosing = false
         SessionController.shared.makeCanvasKey()
+    }
+
+    /// 会话开始/结束时调整设置窗口层级。
+    /// 只有标注进行中才需要盖住冻结层；平时用普通层级，
+    /// 否则 NSOpenPanel / NSColorPanel 这类系统面板会被压在设置窗口下面。
+    func adaptToSession() {
+        guard let w = window else { return }
+        w.level = SessionController.shared.isActive
+            ? NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 4)
+            : .normal
+        ColorPanelBridge.shared.updateLevel(above: w.level)
     }
 }

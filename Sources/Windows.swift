@@ -325,6 +325,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         showToolbar()
         magnifier = MagnifierPanel()
         toast = ToastPanel()
+        SettingsWindowController.shared.adaptToSession()
         syncModel()
         applyTool(tool, silent: true)
 
@@ -360,6 +361,7 @@ final class SessionController: NSObject, NSMenuDelegate {
             NSApp.terminate(nil)
             return
         }
+        SettingsWindowController.shared.adaptToSession()
         startPanel?.orderFrontRegardless()
         if let prev = previousApp, prev.bundleIdentifier != Bundle.main.bundleIdentifier {
             prev.activate(options: [])

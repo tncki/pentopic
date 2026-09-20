@@ -145,6 +145,22 @@ do {
     print("")
 }
 
+// ---------------------------------------------------------------- 1e. 设置窗口反复开关（闪退回归测试）
+// 之前的 bug：closeWindow() 里 window.close() 会同步发出 willCloseNotification，
+// 观察者又调用 closeWindow()，而 window 是在 close() 之后才置空 —— 无限递归导致闪退。
+// 这里真的把设置窗口开关若干次，如果有递归会直接崩掉这个进程。
+do {
+    for i in 1...5 {
+        SettingsWindowController.shared.show()
+        let windows = NSApp.windows.filter { $0.styleMask.contains(.titled) && $0.isVisible }
+        guard let w = windows.first else { print("[验证] 第 \(i) 次：设置窗口未出现 ❌"); break }
+        w.close()                       // 等价于点「取消」/「确定」/红叉
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        if i == 1 { print("[验证] 设置窗口关闭路径无递归闪退 = OK（开关 5 次）") }
+    }
+    print("")
+}
+
 // ---------------------------------------------------------------- 2. 全部工具
 guard let screen = NSScreen.main ?? NSScreen.screens.first else {
     print("no screen"); exit(1)

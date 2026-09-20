@@ -26,6 +26,22 @@
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+
+    <!--
+      声明本应用支持的本地化。**必须要有**：
+      NSOpenPanel / NSSavePanel 等系统面板会跟随"宿主应用的本地化"来渲染，
+      如果这里不声明、包里也没有对应的 .lproj，macOS 会认定本应用只有英文，
+      于是用户在中文系统下看到的文件选择面板也是英文的。
+    -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>zh-Hans</string>
+        <string>zh-Hant</string>
+        <string>de</string>
+    </array>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>

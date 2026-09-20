@@ -128,6 +128,13 @@ cp "$PLIST" "$APP/Contents/Info.plist"
 [ -f "$ROOT/Resources/AppIcon.icns" ] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 cp "$ROOT/Resources/PrivacyInfo.xcprivacy" "$APP/Contents/Resources/"
 
+# 为每种界面语言建一个 .lproj 目录：只有 CFBundleLocalizations 还不够，
+# AppKit 还要看包里实际存在哪些 .lproj 才会把系统面板（打开/保存对话框）切成对应语言。
+for L in en zh-Hans zh-Hant de; do
+  mkdir -p "$APP/Contents/Resources/$L.lproj"
+  : > "$APP/Contents/Resources/$L.lproj/Localizable.strings"
+done
+
 # ---- 签名 ------------------------------------------------------------------
 ENTITLEMENTS=""
 [ "$MODE" = "release" ] && ENTITLEMENTS="$ROOT/Resources/entitlements-developerid.plist"
@@ -140,9 +147,14 @@ if [ "$MODE" = "debug" ]; then
     # 本 bundle 里没有嵌套代码，本来也不需要 --deep。
     if ! codesign --force --sign "$DEV_IDENTITY" "$APP"; then
       echo
-      echo "!! 签名失败。若报 errSecInternalComponent，通常是登录钥匙串被锁住了："
-      echo "   打开「钥匙串访问」解锁后再重试。"
-      exit 4
+      echo "!! 用证书签名失败（errSecInternalComponent 通常是登录钥匙串被锁住）。"
+      echo "   先解锁钥匙串再重跑效果最好："
+      echo "     钥匙串访问 → 右键「登录」钥匙串 → 解锁"
+      echo "   或: security unlock-keychain ~/Library/Keychains/login.keychain-db"
+      echo
+      echo "   现在改为 ad-hoc 签名以保证产物可用，"
+      echo "   ⚠️  但这会让屏幕录制授权失效，需要重新授权一次。"
+      codesign --force --sign - "$APP" || { echo "!! ad-hoc 签名也失败"; exit 4; }
     fi
     echo "    指定要求: $(codesign -d -r- "$APP" 2>&1 | grep -o 'designated.*')"
   else

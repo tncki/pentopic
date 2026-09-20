@@ -46,7 +46,15 @@ cat > "$BUNDLE/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>NSHumanReadableCopyright</key><string>${COPYRIGHT:-}</string>
   <key>LSUIElement</key><true/>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key>
+  <array><string>en</string><string>zh-Hans</string><string>zh-Hant</string><string>de</string></array>
 </dict></plist>
 PLIST
+
+for L in en zh-Hans zh-Hant de; do
+  mkdir -p "$BUNDLE/Contents/Resources/$L.lproj"
+  : > "$BUNDLE/Contents/Resources/$L.lproj/Localizable.strings"
+done
 
 "$BUNDLE/Contents/MacOS/POFPreview"

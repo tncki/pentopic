@@ -104,6 +104,12 @@ do {
     print("[验证] 邮件目录写回 = \(Prefs.emailFolder.path == tmpB ? "OK" : "失败(\(Prefs.emailFolder.path))")")
     print("[验证] 目录已自动创建 = \(FileManager.default.fileExists(atPath: tmpA) ? "OK" : "失败")")
 
+    // 本地化声明：NSOpenPanel / NSSavePanel 等系统面板按"宿主应用的本地化"渲染，
+    // preferredLocalizations 就是系统面板实际会用的语言。
+    print("[验证] Bundle.localizations          = \(Bundle.main.localizations.sorted())")
+    print("[验证] Bundle.preferredLocalizations = \(Bundle.main.preferredLocalizations)")
+    print("[验证] 系统语言                       = \(Locale.preferredLanguages.prefix(2))")
+
     // 版权声明
     print("[验证] Brand.version   = \(Brand.version)")
     print("[验证] Brand.copyright = \(Brand.copyright)")

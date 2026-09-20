@@ -187,6 +187,7 @@ final class ToolbarModel: ObservableObject {
     @Published var swatches: [Swatch] = Palette.standard
     @Published var zoomFactor: CGFloat = 1
     @Published var canUndo = false
+    @Published var canRedo = false
     @Published var hasStrokes = false
     @Published var hasRegion = false
     @Published var screenName = ""
@@ -516,6 +517,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         model.swatches = Palette.all
         model.zoomFactor = activeCanvas?.zoom ?? 1
         model.canUndo = !(activeCanvas?.strokes.isEmpty ?? true)
+        model.canRedo = !(activeCanvas?.undoneStrokes.isEmpty ?? true)
         model.hasStrokes = model.canUndo
         model.hasRegion = activeCanvas?.region != nil
         model.screenName = activeCanvas?.screen.localizedName ?? ""
@@ -625,8 +627,19 @@ final class SessionController: NSObject, NSMenuDelegate {
     // MARK: 动作
 
     func undo() {
-        guard let st = activeCanvas, !st.strokes.isEmpty else { return }
+        guard let st = activeCanvas, let last = st.strokes.last else { return }
         st.strokes.removeLast()
+        st.undoneStrokes.append(last)      // 记住被撤销的，供重做
+        st.rebuild()
+        st.invalidateZoomCache()
+        views.forEach { $0.needsDisplay = true }
+        syncModel()
+    }
+
+    func redo() {
+        guard let st = activeCanvas, let next = st.undoneStrokes.last else { return }
+        st.undoneStrokes.removeLast()
+        st.strokes.append(next)
         st.rebuild()
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
@@ -636,6 +649,7 @@ final class SessionController: NSObject, NSMenuDelegate {
     func clearAll() {
         guard let st = activeCanvas else { return }
         st.strokes.removeAll()
+        st.undoneStrokes.removeAll()
         st.layer.clear()
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
@@ -655,6 +669,9 @@ final class SessionController: NSObject, NSMenuDelegate {
                                       height: min(st.clipboardSize.height, st.pointSize.height))
         }
         st.background = k
+        // 打码是按"当时的底图"烘焙进标注层的，换底图后必须重放，
+        // 否则会把旧底图的内容留在新底图上。
+        st.rebuild()
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
     }
@@ -670,7 +687,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         switch key {
         case "z":
-            if event.modifierFlags.contains(.shift) { undo() } else { undo() }
+            if event.modifierFlags.contains(.shift) { redo() } else { undo() }
             return true
         case "c": Exporter.copyToClipboard(activeCanvas); return true
         case "v": pasteFromClipboard(); return true
@@ -732,6 +749,10 @@ final class SessionController: NSObject, NSMenuDelegate {
         case "k": setTool(.cross); return true
         case "f": setTool(.region); return true
         case "m": setTool(.magnifier); return true
+        case "n": setTool(.number); return true
+        case "s": setTool(.spotlight); return true
+        case "u": setTool(.blur); return true
+        case "i": setTool(.pixelate); return true
         case "+", "=":
             if let st = activeCanvas { zoom(canvas: st, direction: 1, center: nil) }
             return true

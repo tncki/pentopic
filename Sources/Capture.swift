@@ -116,8 +116,23 @@ extension ScreenCapture {
         ctx.fill(CGRect(x: 0, y: 0, width: pointSize.width, height: 34))
         ctx.setFillColor(NSColor(srgbRed: 0.35, green: 0.62, blue: 0.85, alpha: 1).cgColor)
         ctx.fill(CGRect(x: 40, y: 90, width: 320, height: 180))
+
+        // 加一些"真实内容"，否则纯色区域上的模糊/马赛克看不出任何变化，
+        // 自检和演示图都会失去意义
         ShapeRenderer.drawText(ctx, "FROZEN SCREEN (synthetic)",
-                               origin: CGPoint(x: 24, y: 44), fontSize: 28, color: .black)
+                               origin: CGPoint(x: 24, y: 44), fontSize: 26, color: .black)
+        ShapeRenderer.drawText(ctx, """
+        Account:  user@example.com
+        Password:  hunter2-Secret-2026
+        Token:     9f3c-a17b-4e02-bd55
+        """, origin: CGPoint(x: 420, y: 120), fontSize: 20,
+             color: NSColor(srgbRed: 0.15, green: 0.15, blue: 0.2, alpha: 1))
+        ShapeRenderer.drawText(ctx, """
+        Pointofix works together with nearly every Windows application.
+        Your presentations become more impressive and are absorbed
+        better by the audience.
+        """, origin: CGPoint(x: 40, y: 340), fontSize: 17,
+             color: NSColor(srgbRed: 0.25, green: 0.25, blue: 0.3, alpha: 1))
         return ctx.makeImage()
     }
 }

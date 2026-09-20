@@ -273,6 +273,10 @@ if let st = CanvasState(screen: screen, captured: cap) {
     strokes.append(Stroke(shape: .cross(CGPoint(x: 600, y: 360), 56), color: red, width: 4))
     strokes.append(Stroke(shape: .freehand((0..<40).map { i in
         CGPoint(x: 700 + CGFloat(i) * 5, y: 345 + sin(CGFloat(i) / 3) * 12) }), color: marker, width: 26))
+    strokes.append(Stroke(shape: .number(1, CGPoint(x: 120, y: 470), 44), color: red, width: 4))
+    strokes.append(Stroke(shape: .number(2, CGPoint(x: 200, y: 470), 44), color: blue, width: 4))
+    strokes.append(Stroke(shape: .number(3, CGPoint(x: 280, y: 470), 44), color: NSColor.black, width: 4))
+    strokes.append(Stroke(shape: .spotlight(CGRect(x: 420, y: 400, width: 360, height: 180)), color: red, width: 4))
     for s in strokes { st.layer.apply(s); st.strokes.append(s) }
     if let cg = st.composeCG(region: nil) {
         let url = outDir.appendingPathComponent("02-tools.png")
@@ -368,15 +372,33 @@ print("session active=\(sc.isActive) canvases=\(sc.canvases.count) views=\(sc.al
 if let v = sc.allViews().first {
     renderInPlace(v, named: "07-overlay-session.png")
     // 覆盖层上画几笔，验证真实视图绘制路径
-    let s1 = Stroke(shape: .arrow(CGPoint(x: 380, y: 300), CGPoint(x: 200, y: 160)), color: Palette.red, width: 9)
+    // 打码必须放在**有细节的区域**（文字、色块），放在纯色区看不出任何变化。
+    // 把打码放在有文字的行上 —— 纯色区域上打码看不出变化
+    let blurStroke = Stroke(shape: .redact(CGRect(x: 414, y: 158, width: 330, height: 62), .blur),
+                            color: .black, width: 4)
+    let pixelStroke = Stroke(shape: .redact(CGRect(x: 414, y: 114, width: 330, height: 40), .pixelate),
+                             color: .black, width: 4)
+    let s1 = Stroke(shape: .arrow(CGPoint(x: 860, y: 330), CGPoint(x: 760, y: 200)), color: Palette.red, width: 9)
     let s2 = Stroke(shape: .text("Live-Overlay", CGPoint(x: 60, y: 480), 46), color: Palette.blue, width: 6)
-    let s3 = Stroke(shape: .rectFilled(CGRect(x: 420, y: 60, width: 420, height: 70)),
-                    color: NSColor(srgbRed: 1, green: 0.85, blue: 0.05, alpha: Palette.markerAlpha), width: 3)
-    let s4 = Stroke(shape: .check(CGPoint(x: 300, y: 560), 90), color: Palette.green, width: 6)
-    for s in [s1, s2, s3, s4] { v.state.layer.apply(s); v.state.strokes.append(s) }
+    let s3 = Stroke(shape: .check(CGPoint(x: 300, y: 560), 90), color: Palette.green, width: 6)
+    let s4 = Stroke(shape: .number(1, CGPoint(x: 640, y: 430), 46), color: Palette.red, width: 5)
+    let s5 = Stroke(shape: .number(2, CGPoint(x: 720, y: 430), 46), color: Palette.red, width: 5)
+    for s in [blurStroke, pixelStroke, s1, s2, s3, s4, s5] {
+        v.state.layer.apply(s); v.state.strokes.append(s)
+    }
     v.needsDisplay = true
     v.displayIfNeeded()
     renderInPlace(v, named: "08-overlay-annotated.png")
+
+    // 聚焦高亮单独一张：它会把其余部分压暗，和别的标注混在一起看不清
+    v.state.strokes.removeAll()
+    v.state.layer.clear()
+    let spot = Stroke(shape: .spotlight(CGRect(x: 620, y: 200, width: 520, height: 300)),
+                      color: Palette.red, width: 5)
+    v.state.layer.apply(spot); v.state.strokes.append(spot)
+    v.needsDisplay = true
+    v.displayIfNeeded()
+    renderInPlace(v, named: "10-spotlight.png")
 }
 
 for w in NSApp.windows where w.level.rawValue == NSWindow.Level.screenSaver.rawValue + 1 {

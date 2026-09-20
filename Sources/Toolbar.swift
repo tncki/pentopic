@@ -144,7 +144,9 @@ struct ToolbarView: View {
 
     private var rowPairs: [(ToolKind, ToolKind)] {
         [(.pen, .eraser), (.line, .arrow), (.rect, .rectFilled), (.ellipse, .ellipseFilled),
-         (.doubleArrow, .text), (.check, .cross), (.region, .magnifier), (.zoomIn, .zoomOut)]
+         (.doubleArrow, .text), (.check, .cross),
+         (.number, .spotlight), (.blur, .pixelate),        // 序号 / 聚焦 / 两种打码
+         (.region, .magnifier), (.zoomIn, .zoomOut)]
     }
 
     var body: some View {
@@ -251,99 +253,120 @@ struct ToolbarView: View {
         }
     }
 
+    /// 操作区。工具栏是固定两列宽（Prefs.buttonW * 2 + 间距），
+    /// 所以**每行必须恰好两个按钮** —— 放三个会被 SwiftUI 压缩变形。
     private var actionGrid: some View {
         VStack(spacing: 3) {
             HStack(spacing: 3) {
                 ActionButton(symbol: "arrow.uturn.backward",
                              help: LS("Rückgängig (⌘Z)", "Undo (⌘Z)", "撤销 (⌘Z)", "復原 (⌘Z)"),
                              enabled: model.canUndo) { controller.undo() }
+                ActionButton(symbol: "arrow.uturn.forward",
+                             help: LS("Wiederholen (⇧⌘Z)", "Redo (⇧⌘Z)", "重做 (⇧⌘Z)", "重做 (⇧⌘Z)"),
+                             enabled: model.canRedo) { controller.redo() }
+            }
+            HStack(spacing: 3) {
                 ActionButton(symbol: "trash",
                              help: LS("Alles löschen", "Clear all", "清空标注", "清空標註"),
                              enabled: model.hasStrokes) { controller.clearAll() }
+                sheetMenu
             }
             HStack(spacing: 3) {
-                Menu {
-                    ForEach(BackgroundKind.allCases, id: \.self) { k in
-                        Button {
-                            if k == .clipboard { controller.pasteFromClipboard() } else { controller.setBackground(k) }
-                        } label: {
-                            Label(k.title, systemImage: k.symbol)
-                        }
-                    }
-                } label: {
-                    Image(systemName: "doc")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: Prefs.buttonW, height: Prefs.buttonH)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.55)))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.28), lineWidth: 1))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
-                .help(LS("Neues Blatt", "New sheet", "新建纸", "新建紙"))
-
                 ActionButton(symbol: "doc.on.clipboard",
                              help: LS("In Zwischenablage kopieren (⌘C)", "Copy to clipboard (⌘C)", "复制到剪贴板 (⌘C)", "複製到剪貼簿 (⌘C)")) {
                     Exporter.copyToClipboard(controller.activeCanvas)
                 }
-            }
-            HStack(spacing: 3) {
                 ActionButton(symbol: "printer",
                              help: LS("Drucken (⌘P)", "Print (⌘P)", "打印 (⌘P)", "列印 (⌘P)")) {
                     Exporter.print(controller.activeCanvas)
                 }
-                Menu {
-                    Button(LS("Speichern unter … (⌘S)", "Save as … (⌘S)", "另存为 … (⌘S)", "另存新檔 … (⌘S)")) {
-                        Exporter.saveWithPanel(controller.activeCanvas, screen: controller.activeCanvas?.screen)
-                    }
-                    Divider()
-                    Button(LS("Als PNG im Screenshot-Ordner ablegen", "Save PNG to screenshots folder", "存为 PNG 到截图文件夹", "儲存 PNG 到截圖資料夾")) {
-                        Exporter.saveToFolder(controller.activeCanvas, format: .png)
-                    }
-                    Button(LS("Als JPG im Screenshot-Ordner ablegen", "Save JPG to screenshots folder", "存为 JPG 到截图文件夹", "儲存 JPG 到截圖資料夾")) {
-                        Exporter.saveToFolder(controller.activeCanvas, format: .jpg)
-                    }
-                    Divider()
-                    Button(LS("Screenshot-Ordner öffnen (⌘O)", "Open screenshots folder (⌘O)", "打开截图文件夹 (⌘O)", "開啟截圖資料夾 (⌘O)")) {
-                        Exporter.openScreenshotFolder()
-                    }
-                } label: {
-                    Image(systemName: "square.and.arrow.down")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: Prefs.buttonW, height: Prefs.buttonH)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.55)))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.28), lineWidth: 1))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
-                .help(LS("Speichern", "Save", "保存", "儲存"))
             }
             HStack(spacing: 3) {
-                Menu {
-                    Button(LS("Bild per E-Mail senden", "Send image by e-mail", "邮件发送图片", "郵件傳送圖片")) {
-                        Exporter.composeMail(controller.activeCanvas, openFolderFirst: false)
-                    }
-                    Button(LS("E-Mail-Programm und Ordner öffnen (⌘E)", "Open mail app and folder (⌘E)", "打开邮件程序与文件夹 (⌘E)", "開啟郵件程式與資料夾 (⌘E)")) {
-                        Exporter.composeMail(controller.activeCanvas, openFolderFirst: true)
-                    }
-                } label: {
-                    Image(systemName: "envelope")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: Prefs.buttonW, height: Prefs.buttonH)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.55)))
-                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.28), lineWidth: 1))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
-                .help(LS("Per E-Mail senden", "Send by e-mail", "邮件发送", "郵件傳送"))
-
+                saveMenu
+                mailMenu
+            }
+            HStack(spacing: 3) {
                 ActionButton(symbol: "info.circle",
                              help: LS("Info & Einstellungen", "Info & settings", "信息与设置", "資訊與設定")) {
                     SettingsWindowController.shared.show()
                 }
+                Spacer().frame(width: Prefs.buttonW)
             }
         }
     }
+
+    // MARK: 下拉菜单按钮（复用同一套外观）
+
+    private var sheetMenu: some View {
+        Menu {
+            ForEach(BackgroundKind.allCases, id: \.self) { k in
+                Button {
+                    if k == .clipboard { controller.pasteFromClipboard() } else { controller.setBackground(k) }
+                } label: {
+                    Label(k.title, systemImage: k.symbol)
+                }
+            }
+        } label: {
+            Image(systemName: "doc")
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.55)))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.28), lineWidth: 1))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+        .help(LS("Neues Blatt", "New sheet", "新建纸", "新建紙"))
+    }
+
+    private var saveMenu: some View {
+        Menu {
+            Button(LS("Speichern unter … (⌘S)", "Save as … (⌘S)", "另存为 … (⌘S)", "另存新檔 … (⌘S)")) {
+                Exporter.saveWithPanel(controller.activeCanvas, screen: controller.activeCanvas?.screen)
+            }
+            Divider()
+            Button(LS("Als PNG im Screenshot-Ordner ablegen", "Save PNG to screenshots folder", "存为 PNG 到截图文件夹", "儲存 PNG 到截圖資料夾")) {
+                Exporter.saveToFolder(controller.activeCanvas, format: .png)
+            }
+            Button(LS("Als JPG im Screenshot-Ordner ablegen", "Save JPG to screenshots folder", "存为 JPG 到截图文件夹", "儲存 JPG 到截圖資料夾")) {
+                Exporter.saveToFolder(controller.activeCanvas, format: .jpg)
+            }
+            Divider()
+            Button(LS("Screenshot-Ordner öffnen (⌘O)", "Open screenshots folder (⌘O)", "打开截图文件夹 (⌘O)", "開啟截圖資料夾 (⌘O)")) {
+                Exporter.openScreenshotFolder()
+            }
+        } label: {
+            Image(systemName: "square.and.arrow.down")
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.55)))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.28), lineWidth: 1))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+        .help(LS("Speichern", "Save", "保存", "儲存"))
+    }
+
+    private var mailMenu: some View {
+        Menu {
+            Button(LS("Bild per E-Mail senden", "Send image by e-mail", "邮件发送图片", "郵件傳送圖片")) {
+                Exporter.composeMail(controller.activeCanvas, openFolderFirst: false)
+            }
+            Button(LS("E-Mail-Programm und Ordner öffnen (⌘E)", "Open mail app and folder (⌘E)", "打开邮件程序与文件夹 (⌘E)", "開啟郵件程式與資料夾 (⌘E)")) {
+                Exporter.composeMail(controller.activeCanvas, openFolderFirst: true)
+            }
+        } label: {
+            Image(systemName: "envelope")
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.55)))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.28), lineWidth: 1))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+        .help(LS("Per E-Mail senden", "Send by e-mail", "邮件发送", "郵件傳送"))
+    }
 }
+

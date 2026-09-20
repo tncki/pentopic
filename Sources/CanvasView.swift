@@ -12,6 +12,8 @@ final class CanvasState {
     let layer: AnnotationLayer
 
     var strokes: [Stroke] = []
+    /// 已撤销的笔画（用于重做）。任何新笔画都会清空它 —— 这是撤销栈的标准语义。
+    var undoneStrokes: [Stroke] = []
     var region: CGRect?
     var background: BackgroundKind = .currentScreen
     var clipboardCG: CGImage?
@@ -39,6 +41,28 @@ final class CanvasState {
         guard let l = AnnotationLayer(pixelWidth: pw, pixelHeight: ph, scale: screen.backingScaleFactor) else { return nil }
         self.layer = l
         self.zoomCenter = CGPoint(x: screen.frame.width / 2, y: screen.frame.height / 2)
+
+        // 打码要读底图。用闭包而不是快照 —— 底图会随「空白纸 / 剪贴板」变化。
+        l.backgroundProvider = { [weak self] in self?.currentBackgroundCG() }
+        l.backgroundScale = screen.backingScaleFactor
+    }
+
+    /// 下一个序号。直接从已有笔画推导 —— 这样撤销/重做后编号自动正确，
+    /// 不需要额外维护一个会和历史脱节的计数器。
+    var nextNumber: Int {
+        strokes.reduce(1) { acc, s in
+            if case .number = s.shape { return acc + 1 }
+            return acc
+        }
+    }
+
+    /// 可供打码读取的底图。空白纸/方格纸这类没有"底下的内容"，返回 nil。
+    func currentBackgroundCG() -> CGImage? {
+        switch background {
+        case .currentScreen: return frozenCG
+        case .clipboard:     return clipboardCG ?? frozenCG
+        default:             return nil
+        }
     }
 
     var bounds: CGRect { CGRect(origin: .zero, size: pointSize) }
@@ -307,6 +331,9 @@ final class CanvasView: NSView {
     private var regionMoveOffset: CGPoint?
 
     private var lastPan: CGPoint?
+    /// 本次拖动是否被拒绝（例如空白纸上打码）。mouseDown 里 return 只能挡住"按下"，
+    /// 后面的 mouseDragged / mouseUp 照样会跑，所以需要一个标记贯穿整次拖动。
+    private var dragRejected = false
 
     init(state: CanvasState, controller: SessionController) {
         self.state = state
@@ -351,7 +378,8 @@ final class CanvasView: NSView {
         if Prefs.cursorMode == .toolSymbol {
             switch tool {
             case .pen, .eraser, .line, .arrow, .doubleArrow, .rect, .rectFilled,
-                 .ellipse, .ellipseFilled, .check, .cross:
+                 .ellipse, .ellipseFilled, .check, .cross,
+                 .number, .spotlight, .blur, .pixelate:
                 return CursorFactory.dot(size: max(6, c.penSize))
             case .text:
                 return CursorFactory.text()
@@ -534,6 +562,7 @@ final class CanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard let c = controller else { return }
         window?.makeFirstResponder(self)
+        dragRejected = false
         let p = pt(event)
         dragStart = p
         dragCurrent = p
@@ -575,9 +604,21 @@ final class CanvasView: NSView {
                 live = Stroke(shape: .freehand([p]), color: strokeColor, width: w)
             }
             needsDisplay = true
-        case .line, .arrow, .doubleArrow, .rect, .rectFilled, .ellipse, .ellipseFilled:
+        case .line, .arrow, .doubleArrow, .rect, .rectFilled, .ellipse, .ellipseFilled,
+             .spotlight, .blur, .pixelate:
+            if (c.tool == .blur || c.tool == .pixelate) && state.currentBackgroundCG() == nil {
+                c.flashStatus(LS("Dieses Blatt hat keinen Inhalt zum Unkenntlichmachen – nur bei „Aktueller Bildschirm“ oder „Aus Zwischenablage“ möglich.",
+                                 "This sheet has nothing to redact — redaction works on “Current screen” or “Paste from clipboard”.",
+                                 "当前画板没有可打码的内容 —— 打码只对「当前屏幕」和「从剪贴板粘贴」生效。",
+                                 "當前畫板沒有可打碼的內容 —— 打碼只對「當前螢幕」和「從剪貼簿貼上」生效。"))
+                dragRejected = true
+                return
+            }
             live = Stroke(shape: .line(p, p), color: strokeColor, width: w)
             needsDisplay = true
+        case .number:
+            commit(Stroke(shape: .number(state.nextNumber, p, w * 2.4 + 14),
+                          color: strokeColor, width: w))
         case .text:
             beginTextEditing(at: p, color: strokeColor, width: w)
         case .check:
@@ -612,6 +653,7 @@ final class CanvasView: NSView {
         let p = pt(event)
         mousePoint = p
         dragCurrent = p
+        if dragRejected { return }          // 本次拖动已被拒绝，别偷偷把笔画建起来
 
         if state.isZoomed {
             if c.tool == .magnifier {
@@ -665,6 +707,18 @@ final class CanvasView: NSView {
         case .ellipseFilled:
             live = Stroke(shape: .ellipseFilled(makeRect(dragStart, p, constrain: shift)), color: c.currentColor, width: c.penSize)
             needsDisplay = true
+        case .spotlight:
+            live = Stroke(shape: .spotlight(makeRect(dragStart, p, constrain: shift)),
+                          color: c.currentColor, width: c.penSize)
+            needsDisplay = true
+        case .blur:
+            live = Stroke(shape: .redact(makeRect(dragStart, p, constrain: shift), .blur),
+                          color: c.currentColor, width: c.penSize)
+            needsDisplay = true
+        case .pixelate:
+            live = Stroke(shape: .redact(makeRect(dragStart, p, constrain: shift), .pixelate),
+                          color: c.currentColor, width: c.penSize)
+            needsDisplay = true
         case .region:
             if let off = regionMoveOffset, let r = state.region {
                 state.region = CGRect(x: p.x - off.x, y: p.y - off.y, width: r.width, height: r.height)
@@ -681,6 +735,7 @@ final class CanvasView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         guard let c = controller else { return }
+        if dragRejected { dragRejected = false; live = nil; needsDisplay = true; return }
         if state.isZoomed { lastPan = nil; return }
 
         switch c.tool {
@@ -692,10 +747,21 @@ final class CanvasView: NSView {
             if pts.count > 1 {
                 state.strokes.append(Stroke(shape: .freehand(pts), color: .black,
                                             width: c.penSize * 2.2, isEraser: true))
+                state.undoneStrokes.removeAll()
                 c.didChangeStrokes(state)
             }
         case .line, .arrow, .doubleArrow, .rect, .rectFilled, .ellipse, .ellipseFilled:
             if let s = live { commit(s) }
+        case .spotlight, .blur, .pixelate:
+            // 拖得太小就当作误触，不留下一条没有意义的笔画
+            if let s = live, case .spotlight(let r) = s.shape, r.width > 6, r.height > 6 {
+                commit(s)
+            } else if let s = live, case .redact(let r, _) = s.shape, r.width > 6, r.height > 6 {
+                commit(s)
+            } else {
+                live = nil
+                needsDisplay = true
+            }
         case .region:
             regionDragStart = nil
             regionMoveOffset = nil
@@ -717,6 +783,7 @@ final class CanvasView: NSView {
     private func commit(_ s: Stroke) {
         state.layer.apply(s)
         state.strokes.append(s)
+        state.undoneStrokes.removeAll()      // 新操作让重做栈失效
         live = nil
         livePoints = []
         state.invalidateZoomCache()

@@ -349,10 +349,157 @@ enum SelfTest {
         }
         shot(view, "S05-马克笔与橡皮擦.png")
 
+        // ---- 4b. 打码：必须证明内容真的被抹掉，而不只是"颜色变了" ----
+        log("")
+        log("[4b] 打码（模糊 / 马赛克）")
+
+        /// 把区域渲染成一张位图，直接读像素统计。
+        /// 之前用"稀疏采样点的独立颜色数"是错的 —— 像素化会让每个格子产生不同的均值，
+        /// 颜色数反而可能变多；真正该测的是**相邻像素的差异**（高频细节）。
+        func regionStats(_ img: CGImage, _ rectPoints: CGRect, _ scale: CGFloat) -> (colors: Int, fine: Double) {
+            let px = CGRect(x: rectPoints.minX * scale, y: rectPoints.minY * scale,
+                            width: rectPoints.width * scale, height: rectPoints.height * scale).integral
+            let w = Int(px.width), h = Int(px.height)
+            guard w > 2, h > 2,
+                  let sub = img.cropping(to: px.intersection(CGRect(x: 0, y: 0, width: img.width, height: img.height))) else {
+                return (0, 0)
+            }
+            var buf = [UInt8](repeating: 0, count: w * h * 4)
+            let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+            guard let ctx = CGContext(data: &buf, width: w, height: h, bitsPerComponent: 8,
+                                      bytesPerRow: w * 4, space: cs,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return (0, 0) }
+            ctx.interpolationQuality = .none
+            ctx.draw(sub, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+            var colors = Set<UInt32>()
+            var diffs: [Double] = []
+            // 沿每一行比较相邻像素 —— 打码会把高频细节抹平，这个值必然下降
+            for y in stride(from: 0, to: h, by: max(1, h / 40)) {
+                var prev: UInt32?
+                for x in 0..<w {
+                    let o = (y * w + x) * 4
+                    let v = (UInt32(buf[o]) << 16) | (UInt32(buf[o + 1]) << 8) | UInt32(buf[o + 2])
+                    colors.insert(v)
+                    if let p = prev {
+                        let dr = Double(abs(Int(buf[o]) - Int((p >> 16) & 0xFF)))
+                        let dg = Double(abs(Int(buf[o + 1]) - Int((p >> 8) & 0xFF)))
+                        let db = Double(abs(Int(buf[o + 2]) - Int(p & 0xFF)))
+                        diffs.append((dr + dg + db) / 3.0)
+                    }
+                    prev = v
+                }
+            }
+            return (colors.count, diffs.isEmpty ? 0 : diffs.reduce(0, +) / Double(diffs.count))
+        }
+
+        let redactRect = CGRect(x: 120, y: 150, width: 380, height: 220)
+        if let frozen = st.frozenCG, let before = st.composeCG(region: nil) {
+            let base = regionStats(frozen, redactRect, st.scale)
+            log("  底图该区域: \(base.colors) 种颜色, 相邻像素平均差 \(String(format: "%.2f", base.fine))")
+
+            // 马赛克
+            sc.setTool(.pixelate)
+            drag([CGPoint(x: redactRect.minX, y: redactRect.minY),
+                  CGPoint(x: redactRect.maxX, y: redactRect.maxY)])
+            pump(0.2)
+            check("马赛克笔画已提交", st.strokes.last.map { if case .redact(_, .pixelate) = $0.shape { return true }; return false } ?? false)
+
+            if let after = st.composeCG(region: nil) {
+                let px = regionStats(after, redactRect, st.scale)
+                log("  马赛克后:   \(px.colors) 种颜色, 相邻像素平均差 \(String(format: "%.2f", px.fine))")
+                check("马赛克抹平了高频细节（内容被抹掉）", px.fine < base.fine * 0.5,
+                      String(format: "%.2f → %.2f", base.fine, px.fine))
+            }
+
+            // 撤销马赛克
+            sc.undo()
+            pump(0.1)
+
+            // 模糊
+            sc.setTool(.blur)
+            drag([CGPoint(x: redactRect.minX, y: redactRect.minY),
+                  CGPoint(x: redactRect.maxX, y: redactRect.maxY)])
+            pump(0.2)
+            if let after = st.composeCG(region: nil) {
+                let bl = regionStats(after, redactRect, st.scale)
+                log("  模糊后:     \(bl.colors) 种颜色, 相邻像素平均差 \(String(format: "%.2f", bl.fine))")
+                check("模糊柔化了画面", bl.fine < base.fine,
+                      String(format: "%.2f → %.2f", base.fine, bl.fine))
+            }
+            sc.undo()
+            pump(0.1)
+            // 白纸上没有可打码的内容 → 应被拒绝
+            sc.setBackground(.white); pump(0.1)
+            let strokesBefore = st.strokes.count
+            sc.setTool(.pixelate)
+            drag([CGPoint(x: 200, y: 200), CGPoint(x: 400, y: 300)])
+            pump(0.1)
+            check("空白纸上打码被拒绝（没有可打码的内容）", st.strokes.count == strokesBefore,
+                  "笔画数 \(strokesBefore) → \(st.strokes.count)")
+            sc.setBackground(.currentScreen); pump(0.2)
+        }
+
+        // ---- 4c. 序号标注 + 重做 ----
+        log("")
+        log("[4c] 序号标注与重做")
+        sc.clearAll(); pump(0.1)
+        sc.setTool(.number)
+        var placed: [Int] = []
+        for x in [200.0, 320.0, 440.0] {
+            click(CGPoint(x: x, y: 600))
+            if case .number(let n, _, _) = st.strokes.last?.shape ?? .rect(.zero) { placed.append(n) }
+        }
+        check("序号自动递增 1,2,3", placed == [1, 2, 3], "实际 \(placed)")
+        sc.undo(); pump(0.1)
+        check("撤销后序号重算为 3", st.nextNumber == 3, "nextNumber = \(st.nextNumber)")
+        click(CGPoint(x: 560, y: 600))
+        if case .number(let n, _, _) = st.strokes.last?.shape ?? .rect(.zero) {
+            check("重新落号接续为 3", n == 3, "实际 \(n)")
+        }
+
+        let beforeRedo = st.strokes.count
+        sc.undo(); sc.undo()
+        let afterUndo = st.strokes.count
+        sc.redo(); sc.redo()
+        check("重做恢复撤销的笔画", st.strokes.count == beforeRedo,
+              "\(beforeRedo) → 撤销后 \(afterUndo) → 重做后 \(st.strokes.count)")
+        check("重做栈已清空", st.undoneStrokes.isEmpty)
+        sc.redo()
+        check("无可重做时 redo 是安全的空操作", st.strokes.count == beforeRedo)
+
+        // ---- 4d. 聚焦高亮 ----
+        log("")
+        log("[4d] 聚焦高亮")
+        sc.clearAll(); pump(0.1)
+        let focus = CGRect(x: 300, y: 300, width: 400, height: 260)
+        if let bg = st.composeCG(region: nil) {
+            let inside = PixelSampler.color(of: bg, at: CGPoint(x: focus.midX * st.scale, y: focus.midY * st.scale))
+            let outsideBefore = PixelSampler.color(of: bg, at: CGPoint(x: 80 * st.scale, y: 80 * st.scale))
+            sc.setTool(.spotlight)
+            drag([CGPoint(x: focus.minX, y: focus.minY), CGPoint(x: focus.maxX, y: focus.maxY)])
+            pump(0.2)
+            if let after = st.composeCG(region: nil) {
+                let inAfter = PixelSampler.color(of: after, at: CGPoint(x: focus.midX * st.scale, y: focus.midY * st.scale))
+                let outAfter = PixelSampler.color(of: after, at: CGPoint(x: 80 * st.scale, y: 80 * st.scale))
+                check("聚焦区内部保持原样", inAfter?.hexString == inside?.hexString,
+                      "\(inside?.hexString ?? "?") → \(inAfter?.hexString ?? "?")")
+                check("聚焦区外部被压暗", outAfter?.hexString != outsideBefore?.hexString,
+                      "\(outsideBefore?.hexString ?? "?") → \(outAfter?.hexString ?? "?")")
+            }
+        }
+        sc.clearAll(); pump(0.1)
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")
+        // 前面的用例结尾会清空画布，这里先画两条保证有东西可撤销
+        sc.setTool(.pen); sc.setPenSize(1); sc.setSwatch(1)
+        drag([CGPoint(x: 200, y: 700), CGPoint(x: 260, y: 730)])
+        drag([CGPoint(x: 300, y: 700), CGPoint(x: 360, y: 730)])
+        pump(0.1)
         let before = st.strokes.count
+        check("已准备两条笔画", before >= 2, "笔画数 \(before)")
         st.invalidateZoomCache()
         sc.undo()
         check("撤销一条", st.strokes.count == before - 1, "\(before) → \(st.strokes.count)")

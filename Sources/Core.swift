@@ -73,6 +73,9 @@ enum ToolKind: String, CaseIterable {
     case line, arrow, doubleArrow
     case rect, rectFilled, ellipse, ellipseFilled
     case text, check, cross
+    case number            // 序号标注（自动递增）
+    case spotlight         // 聚焦高亮：其余部分压暗
+    case blur, pixelate    // 打码：模糊 / 像素化
     case region, magnifier
     case zoomIn, zoomOut
 
@@ -90,6 +93,10 @@ enum ToolKind: String, CaseIterable {
         case .text: return "textformat"
         case .check: return "checkmark"
         case .cross: return "xmark"
+        case .number: return "1.circle"
+        case .spotlight: return "flashlight.on.fill"
+        case .blur: return "drop.fill"
+        case .pixelate: return "squareshape.split.3x3"
         case .region: return "rectangle.dashed"
         case .magnifier: return "magnifyingglass"
         case .zoomIn: return "plus.magnifyingglass"
@@ -111,6 +118,10 @@ enum ToolKind: String, CaseIterable {
         case .text: return LS("Texteingabe", "Text", "文字", "文字")
         case .check: return LS("Häkchen", "Check mark", "对勾", "打勾")
         case .cross: return LS("Kreuz", "Cross", "叉号", "叉號")
+        case .number: return LS("Nummerierung", "Step number", "序号标注", "序號標註")
+        case .spotlight: return LS("Fokus", "Spotlight", "聚焦高亮", "聚焦高亮")
+        case .blur: return LS("Weichzeichnen", "Blur", "模糊打码", "模糊打碼")
+        case .pixelate: return LS("Verpixeln", "Pixelate", "马赛克打码", "馬賽克打碼")
         case .region: return LS("Bildbereich wählen", "Select region", "选区", "選取範圍")
         case .magnifier: return LS("Lupe", "Magnifier", "放大镜", "放大鏡")
         case .zoomIn: return LS("Hineinzoomen", "Zoom in", "放大视图", "放大檢視")
@@ -133,6 +144,10 @@ enum ToolKind: String, CaseIterable {
         case .text: return "T"
         case .check: return "H"
         case .cross: return "K"
+        case .number: return "N"
+        case .spotlight: return "S"
+        case .blur: return "U"
+        case .pixelate: return "I"
         case .region: return "F"
         case .magnifier: return "M"
         case .zoomIn: return "+"
@@ -229,6 +244,21 @@ enum Shape {
     case text(String, CGPoint, CGFloat)   // 文本、左上角、字号
     case check(CGPoint, CGFloat)          // 中心、尺寸
     case cross(CGPoint, CGFloat)
+    case number(Int, CGPoint, CGFloat)    // 序号、中心、直径
+    case spotlight(CGRect)                // 聚焦区（其余压暗）
+    case redact(CGRect, RedactStyle)      // 打码区（读取底图做滤镜）
+}
+
+/// 打码方式
+enum RedactStyle: String {
+    case blur, pixelate
+
+    var title: String {
+        switch self {
+        case .blur: return LS("Weichzeichnen", "Blur", "模糊", "模糊")
+        case .pixelate: return LS("Verpixeln", "Pixelate", "马赛克", "馬賽克")
+        }
+    }
 }
 
 struct Stroke {
@@ -317,6 +347,22 @@ enum ShapeRenderer {
             drawCheck(ctx, center: c, size: s, width: stroke.width)
         case .cross(let c, let s):
             drawCross(ctx, center: c, size: s, width: stroke.width)
+        case .number(let n, let c, let d):
+            drawNumber(ctx, n, center: c, diameter: d, color: stroke.color)
+        case .spotlight(let r):
+            drawSpotlight(ctx, r)
+        case .redact:
+            // 真正的打码由 AnnotationLayer 处理（它拿得到底图）。
+            // 走到这里只可能是实时预览，画个占位提示。
+            if case .redact(let r, _) = stroke.shape {
+                ctx.saveGState()
+                ctx.setFillColor(NSColor(srgbRed: 0.35, green: 0.38, blue: 0.45, alpha: 0.55).cgColor)
+                ctx.fill(r)
+                ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.8).cgColor)
+                ctx.setLineWidth(1)
+                ctx.stroke(r)
+                ctx.restoreGState()
+            }
         }
         ctx.restoreGState()
     }
@@ -372,6 +418,48 @@ enum ShapeRenderer {
         return CGSize(width: max(w, fontSize), height: lineHeight * CGFloat(max(1, lines.count)))
     }
 
+    /// 序号标注：实心圆 + 白色数字
+    private static func drawNumber(_ ctx: CGContext, _ n: Int, center: CGPoint, diameter: CGFloat, color: NSColor) {
+        let d = max(18, diameter)
+        let r = CGRect(x: center.x - d / 2, y: center.y - d / 2, width: d, height: d)
+        ctx.saveGState()
+        // 描一圈白边，保证在任何底色上都看得清
+        ctx.setFillColor(NSColor.white.withAlphaComponent(0.92).cgColor)
+        ctx.fillEllipse(in: r.insetBy(dx: -1.5, dy: -1.5))
+        ctx.setFillColor((color.usingColorSpace(.sRGB) ?? color).cgColor)
+        ctx.fillEllipse(in: r)
+
+        let text = "\(n)"
+        let fontSize = d * 0.52
+        let font = NSFont.systemFont(ofSize: fontSize, weight: .bold)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attrs))
+        let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+        ctx.textMatrix = .identity
+        ctx.translateBy(x: center.x - bounds.width / 2 - bounds.minX,
+                        y: center.y + bounds.height / 2 - bounds.minY)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.textPosition = .zero
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
+    }
+
+    /// 聚焦高亮：整屏压暗，把聚焦区挖空，并描一圈边框
+    private static func drawSpotlight(_ ctx: CGContext, _ r: CGRect) {
+        ctx.saveGState()
+        let path = CGMutablePath()
+        path.addRect(CGRect(x: -20000, y: -20000, width: 40000, height: 40000))
+        path.addRect(r)
+        ctx.addPath(path)
+        ctx.setFillColor(NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.55).cgColor)
+        ctx.fillPath(using: .evenOdd)
+
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
+        ctx.setLineWidth(1.5)
+        ctx.stroke(r)
+        ctx.restoreGState()
+    }
+
     private static func drawCheck(_ ctx: CGContext, center: CGPoint, size: CGFloat, width: CGFloat) {
         let s = max(14, size)
         let c = Palette.checkGreen
@@ -402,6 +490,34 @@ enum ShapeRenderer {
     }
 }
 
+// MARK: - 打码滤镜
+
+enum Redact {
+    private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    /// 对一小块底图应用打码滤镜。
+    /// 关键点：高斯模糊必须先 `clampedToExtent()`，否则边缘采样不到内容会发暗
+    /// （这是 CIGaussianBlur 最经典的坑，表现为打码区四周出现一圈灰边）。
+    static func filter(_ img: CGImage, style: RedactStyle) -> CGImage? {
+        let src = CIImage(cgImage: img)
+        let extent = src.extent
+        guard extent.width >= 1, extent.height >= 1 else { return nil }
+
+        let out: CIImage?
+        switch style {
+        case .blur:
+            out = src.clampedToExtent()
+                .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 14.0])
+                .cropped(to: extent)
+        case .pixelate:
+            out = src.applyingFilter("CIPixellate", parameters: [kCIInputScaleKey: 12.0])
+                .cropped(to: extent)
+        }
+        guard let o = out else { return nil }
+        return ciContext.createCGImage(o, from: extent)
+    }
+}
+
 // MARK: - 标注图层（透明位图，橡皮擦用 .clear 混合挖空）
 
 final class AnnotationLayer {
@@ -411,6 +527,11 @@ final class AnnotationLayer {
     let ctx: CGContext
     /// 以点为单位、左上角为原点、y 轴向下的逻辑尺寸
     var pointSize: CGSize { CGSize(width: CGFloat(pixelWidth) / scale, height: CGFloat(pixelHeight) / scale) }
+
+    /// 打码需要读取底图。由 CanvasState 注入 —— 底图会随「空白纸 / 剪贴板」变化，
+    /// 所以这里用闭包每次取当前值，而不是持有快照。
+    var backgroundProvider: (() -> CGImage?)?
+    var backgroundScale: CGFloat = 2
 
     init?(pixelWidth: Int, pixelHeight: Int, scale: CGFloat) {
         guard pixelWidth > 0, pixelHeight > 0 else { return nil }
@@ -432,7 +553,35 @@ final class AnnotationLayer {
         ctx.clear(CGRect(x: 0, y: 0, width: pointSize.width, height: pointSize.height))
     }
 
-    func apply(_ stroke: Stroke) { ShapeRenderer.draw(stroke, in: ctx) }
+    func apply(_ stroke: Stroke) {
+        if case .redact(let rect, let style) = stroke.shape {
+            applyRedaction(rect: rect, style: style)
+        } else {
+            ShapeRenderer.draw(stroke, in: ctx)
+        }
+    }
+
+    /// 把 rect 区域内的底图抠出来做打码，再贴回标注层。
+    /// 这样打码结果是"烘焙"进图层的，后续画的笔迹自然压在它上面，撤销重放也一致。
+    private func applyRedaction(rect: CGRect, style: RedactStyle) {
+        guard rect.width > 2, rect.height > 2, let bg = backgroundProvider?() else { return }
+        let s = backgroundScale
+        let px = CGRect(x: rect.minX * s, y: rect.minY * s,
+                        width: rect.width * s, height: rect.height * s).integral
+        let clamped = px.intersection(CGRect(x: 0, y: 0, width: bg.width, height: bg.height))
+        guard clamped.width >= 2, clamped.height >= 2,
+              let sub = bg.cropping(to: clamped),
+              let filtered = Redact.filter(sub, style: style) else { return }
+
+        // 被图像边界截断时，贴回的位置要按比例折算
+        let drawRect = CGRect(x: clamped.minX / s, y: clamped.minY / s,
+                              width: clamped.width / s, height: clamped.height / s)
+        ctx.saveGState()
+        ctx.translateBy(x: drawRect.minX, y: drawRect.maxY)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.draw(filtered, in: CGRect(x: 0, y: 0, width: drawRect.width, height: drawRect.height))
+        ctx.restoreGState()
+    }
 
     func rebuild(from strokes: [Stroke]) {
         clear()

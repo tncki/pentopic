@@ -486,17 +486,39 @@ final class SessionController: NSObject, NSMenuDelegate {
         buildSession(screens: screens, captured: caps)
     }
 
+    /// 一块画布的构建参数。整屏捕捉时 rect == screen.frame；
+    /// 「裁剪到选区」和「窗口捕捉」会用更小的 rect。
+    struct CanvasSpec {
+        let screen: NSScreen
+        let image: CGImage?
+        let rect: CGRect
+        var strokes: [Stroke] = []
+    }
+
     private func buildSession(screens: [NSScreen], captured: [CGDirectDisplayID: CapturedScreen]) {
+        buildSession(specs: screens.map {
+            CanvasSpec(screen: $0,
+                       image: captured[ScreenCapture.displayID(of: $0)]?.cgImage,
+                       rect: $0.frame)
+        })
+    }
+
+    private func buildSession(specs: [CanvasSpec]) {
         teardownWindows()
         canvases.removeAll()
         var target: CanvasState?
 
-        for screen in screens {
-            let cap = captured[ScreenCapture.displayID(of: screen)]
-            guard let st = CanvasState(screen: screen, captured: cap) else { continue }
+        for spec in specs {
+            let screen = spec.screen
+            guard let st = CanvasState(screen: screen, image: spec.image,
+                                       rect: spec.rect, scale: screen.backingScaleFactor) else { continue }
+            if !spec.strokes.isEmpty {
+                for s in spec.strokes { st.layer.apply(s) }
+                st.strokes = spec.strokes
+            }
             let view = CanvasView(state: st, controller: self)
 
-            let w = OverlayWindow(contentRect: screen.frame, styleMask: .borderless,
+            let w = OverlayWindow(contentRect: spec.rect, styleMask: .borderless,
                                   backing: .buffered, defer: false)
             w.isOpaque = true
             w.backgroundColor = .black
@@ -506,7 +528,7 @@ final class SessionController: NSObject, NSMenuDelegate {
             w.acceptsMouseMovedEvents = true
             w.isReleasedWhenClosed = false
             w.contentView = view
-            w.setFrame(screen.frame, display: true)
+            w.setFrame(spec.rect, display: true)
             w.orderFrontRegardless()
 
             windows.append(w)
@@ -982,6 +1004,40 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     func pasteFromClipboard() { setBackground(.clipboard) }
 
+    // MARK: 区域捕捉
+
+    /// 把当前画布裁剪到选中的区域：只保留那一块，成为新的画布。
+    /// 已有笔画会整体平移过去，所以裁剪后仍然可以继续编辑和撤销。
+    func cropToRegion() {
+        guard let st = activeCanvas, let r = st.region, r.width > 16, r.height > 16 else {
+            flashStatus(LS("Bitte zuerst mit dem Bereich-Werkzeug einen Bereich aufziehen.",
+                           "Select a region with the region tool first.",
+                           "请先用「选区」工具框出一块区域。",
+                           "請先用「選取範圍」工具框出一塊區域。"))
+            return
+        }
+        guard let frozen = st.frozenCG else {
+            flashStatus(LS("Dieses Blatt hat kein Bild zum Zuschneiden.",
+                           "This sheet has no image to crop.",
+                           "当前画板没有可裁剪的底图。",
+                           "當前畫板沒有可裁剪的底圖。"))
+            return
+        }
+        let px = CGRect(x: r.minX * st.scale, y: r.minY * st.scale,
+                        width: r.width * st.scale, height: r.height * st.scale).integral
+        guard let sub = frozen.cropping(to: px) else { return }
+
+        // 区域的局部坐标 → 屏幕坐标
+        let screenRect = CGRect(x: st.rect.minX + r.minX, y: st.rect.minY + r.minY,
+                                width: r.width, height: r.height)
+        let shifted = st.strokes.map { $0.translated(dx: -r.minX, dy: -r.minY) }
+
+        buildSession(specs: [CanvasSpec(screen: st.screen, image: sub,
+                                        rect: screenRect, strokes: shifted)])
+        flashStatus(LS("Auf Auswahl zugeschnitten", "Cropped to selection",
+                       "已裁剪到选区", "已裁剪到選取範圍"))
+    }
+
     // MARK: 键盘
 
     func handleKeyEquivalent(_ event: NSEvent) -> Bool {
@@ -1112,6 +1168,13 @@ final class SessionController: NSObject, NSMenuDelegate {
         add(LS("Rückgängig (⌘Z)","Undo (⌘Z)","撤销 (⌘Z)", "復原 (⌘Z)"), #selector(menuUndo), "z")
         add(LS("Alles löschen","Clear all","清空标注", "清空標註"), #selector(menuClear))
         m.addItem(.separator())
+        let cropItem = NSMenuItem(title: LS("Auf Auswahl zuschneiden", "Crop to selection",
+                                            "裁剪到选区", "裁剪到選取範圍"),
+                                  action: #selector(menuCrop), keyEquivalent: "")
+        cropItem.target = self
+        cropItem.isEnabled = (activeCanvas?.region != nil)
+        m.addItem(cropItem)
+        m.addItem(.separator())
         add(LS("Kopieren (⌘C)","Copy (⌘C)","复制到剪贴板 (⌘C)", "複製到剪貼簿 (⌘C)"), #selector(menuCopy), "c")
         add(LS("Speichern (⌘S)","Save (⌘S)","保存图片 (⌘S)", "儲存圖片 (⌘S)"), #selector(menuSave), "s")
         add(LS("Drucken (⌘P)","Print (⌘P)","打印 (⌘P)", "列印 (⌘P)"), #selector(menuPrint), "p")
@@ -1128,6 +1191,7 @@ final class SessionController: NSObject, NSMenuDelegate {
     @objc private func menuZoomOut() { if let st = activeCanvas { zoom(canvas: st, direction: -1, center: nil) } }
     @objc private func menuUndo() { undo() }
     @objc private func menuClear() { clearAll() }
+    @objc private func menuCrop() { cropToRegion() }
     @objc private func menuCopy() { Exporter.copyToClipboard(activeCanvas) }
     @objc private func menuSave() { Exporter.saveWithPanel(activeCanvas, screen: activeCanvas?.screen) }
     @objc private func menuPrint() { Exporter.print(activeCanvas) }

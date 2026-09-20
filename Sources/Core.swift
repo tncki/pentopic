@@ -330,6 +330,40 @@ enum NumberShape: String, CaseIterable {
     }
 }
 
+extension Shape {
+    /// 整体平移。裁剪画布时要把已有笔画挪到新坐标系。
+    func translated(dx: CGFloat, dy: CGFloat) -> Shape {
+        func m(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x + dx, y: p.y + dy) }
+        func r(_ q: CGRect) -> CGRect { q.offsetBy(dx: dx, dy: dy) }
+        switch self {
+        case .freehand(let pts):    return .freehand(pts.map(m))
+        case .line(let a, let b):   return .line(m(a), m(b))
+        case .arrow(let a, let b):  return .arrow(m(a), m(b))
+        case .doubleArrow(let a, let b): return .doubleArrow(m(a), m(b))
+        case .rect(let q):          return .rect(r(q))
+        case .rectFilled(let q):    return .rectFilled(r(q))
+        case .ellipse(let q):       return .ellipse(r(q))
+        case .ellipseFilled(let q): return .ellipseFilled(r(q))
+        case .text(let t, let o, let sz):  return .text(t, m(o), sz)
+        case .check(let c, let sz):        return .check(m(c), sz)
+        case .cross(let c, let sz):        return .cross(m(c), sz)
+        case .number(let n, let c, let d, let ns): return .number(n, m(c), d, ns)
+        case .spotlight(let q):     return .spotlight(r(q))
+        case .redact(let q, let st): return .redact(r(q), st)
+        case .ruler(let a, let b, let px): return .ruler(m(a), m(b), px)
+        }
+    }
+}
+
+extension Stroke {
+    /// 整体平移（裁剪画布时用）
+    func translated(dx: CGFloat, dy: CGFloat) -> Stroke {
+        var copy = self
+        copy.shape = shape.translated(dx: dx, dy: dy)
+        return copy
+    }
+}
+
 /// 打码方式
 enum RedactStyle: String {
     case blur, pixelate

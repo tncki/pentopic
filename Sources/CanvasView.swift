@@ -5,6 +5,9 @@ import AppKit
 
 final class CanvasState {
     let screen: NSScreen
+    /// 画布在屏幕坐标系里的位置与大小（点）。
+    /// 整屏捕捉时等于 screen.frame；「区域捕捉」和「窗口捕捉」时是那一小块。
+    let rect: CGRect
     let pointSize: CGSize
     let scale: CGFloat
     let frozenCG: CGImage?
@@ -26,25 +29,34 @@ final class CanvasState {
 
     var isZoomed: Bool { zoom > 1.0001 }
 
-    init?(screen: NSScreen, captured: CapturedScreen?) {
+    /// - Parameters:
+    ///   - rect:  画布在屏幕坐标系里的位置与大小（点）。整屏捕捉传 screen.frame。
+    ///   - image: 冻结的底图（像素尺寸应为 rect.size × scale）。nil 表示捕捉失败，退化成白板。
+    init?(screen: NSScreen, image: CGImage?, rect: CGRect, scale: CGFloat) {
         self.screen = screen
-        self.pointSize = screen.frame.size
-        self.scale = screen.backingScaleFactor
-        self.frozenCG = captured?.cgImage
-        if let c = captured {
-            self.frozenImage = NSImage(cgImage: c.cgImage, size: c.pointSize)
-        } else {
-            self.frozenImage = nil
-        }
-        let pw = Int((screen.frame.width * screen.backingScaleFactor).rounded())
-        let ph = Int((screen.frame.height * screen.backingScaleFactor).rounded())
-        guard let l = AnnotationLayer(pixelWidth: pw, pixelHeight: ph, scale: screen.backingScaleFactor) else { return nil }
+        self.rect = rect
+        self.pointSize = rect.size
+        self.scale = scale
+        self.frozenCG = image
+        self.frozenImage = image.map { NSImage(cgImage: $0, size: rect.size) }
+
+        let pw = Int((rect.width * scale).rounded())
+        let ph = Int((rect.height * scale).rounded())
+        guard let l = AnnotationLayer(pixelWidth: pw, pixelHeight: ph, scale: scale) else { return nil }
         self.layer = l
-        self.zoomCenter = CGPoint(x: screen.frame.width / 2, y: screen.frame.height / 2)
+        self.zoomCenter = CGPoint(x: rect.width / 2, y: rect.height / 2)
 
         // 打码要读底图。用闭包而不是快照 —— 底图会随「空白纸 / 剪贴板」变化。
         l.backgroundProvider = { [weak self] in self?.currentBackgroundCG() }
-        l.backgroundScale = screen.backingScaleFactor
+        l.backgroundScale = scale
+    }
+
+    /// 整屏捕捉的便捷构造
+    convenience init?(screen: NSScreen, captured: CapturedScreen?) {
+        self.init(screen: screen,
+                  image: captured?.cgImage,
+                  rect: screen.frame,
+                  scale: screen.backingScaleFactor)
     }
 
     /// 下一个序号。直接从已有笔画推导 —— 这样撤销/重做后编号自动正确，

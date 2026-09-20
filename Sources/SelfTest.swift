@@ -898,6 +898,47 @@ enum SelfTest {
         check("退出前确实存在浮窗（测试有意义）", panelsBefore > 0, "\(panelsBefore) 个可见浮窗")
         sc.showTooltip(nil)
 
+        // ---- 4h. 区域捕捉（裁剪到选区）----
+        log("")
+        log("[4h] 裁剪到选区")
+        sc.clearAll(); sc.setBackground(.currentScreen); pump(0.25)
+        guard let stC = sc.activeCanvas else { return }
+        let origSize = stC.pointSize
+        let origOrigin = stC.rect.origin
+        // 先画一笔，验证裁剪后笔画会跟着平移而不是丢失
+        sc.setTool(.pen); sc.setPenSize(1); sc.setSwatch(1)
+        drag([CGPoint(x: 200, y: 200), CGPoint(x: 260, y: 240)]); pump(0.1)
+        let strokesBeforeCrop = stC.strokes.count
+        // 再框一个区域
+        sc.setTool(.region)
+        let cropRect = CGRect(x: 150, y: 150, width: 600, height: 400)
+        drag([CGPoint(x: cropRect.minX, y: cropRect.minY),
+              CGPoint(x: cropRect.maxX, y: cropRect.maxY)]); pump(0.2)
+        check("裁剪前选区已建立", stC.region != nil)
+        sc.cropToRegion(); pump(0.4)
+        if let stNew = sc.activeCanvas {
+            check("画布尺寸变成选区大小",
+                  abs(stNew.pointSize.width - cropRect.width) < 2 && abs(stNew.pointSize.height - cropRect.height) < 2,
+                  "\(Int(origSize.width))×\(Int(origSize.height)) → \(Int(stNew.pointSize.width))×\(Int(stNew.pointSize.height))")
+            check("画布位置移到选区处",
+                  abs(stNew.rect.minX - (origOrigin.x + cropRect.minX)) < 2 &&
+                  abs(stNew.rect.minY - (origOrigin.y + cropRect.minY)) < 2,
+                  "(\(Int(stNew.rect.minX)), \(Int(stNew.rect.minY)))")
+            check("笔画被保留（不是被丢弃）", stNew.strokes.count == strokesBeforeCrop,
+                  "\(strokesBeforeCrop) → \(stNew.strokes.count)")
+            // 笔画应已平移到新坐标系
+            if case .freehand(let pts)? = stNew.strokes.first?.shape, let p0 = pts.first {
+                check("笔画已按 -选区原点 平移",
+                      abs(p0.x - (200 - cropRect.minX)) < 2 && abs(p0.y - (200 - cropRect.minY)) < 2,
+                      String(format: "(%.0f, %.0f)", p0.x, p0.y))
+            }
+            check("裁剪后底图存在", stNew.frozenCG != nil)
+            check("裁剪后可继续撤销", !stNew.strokes.isEmpty)
+        } else {
+            check("裁剪后仍有画布", false)
+        }
+        // 注意：裁剪会重建整个会话，测试里早先捕获的 st / view 引用会失效。
+        // 所以本段必须放在**所有其它用例之后**，否则后续用例会操作已销毁的对象。
         // ---- 12. 自动截图 ----
         log("")
         log("[12] 自动截图（Fertig 时）")

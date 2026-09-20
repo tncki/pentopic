@@ -364,6 +364,11 @@ struct ToolbarView: View {
                     SettingsWindowController.shared.show()
                 }
                 Menu {
+                    Button(LS("Auf Auswahl zuschneiden", "Crop to selection",
+                              "裁剪到选区", "裁剪到選取範圍")) {
+                        controller.cropToRegion()
+                    }
+                    Divider()
                     Button(LS("Layout speichern …", "Save layout …", "保存布局 …", "儲存版面 …")) {
                         LayoutConfig.save()
                     }

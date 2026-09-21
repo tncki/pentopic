@@ -916,8 +916,26 @@ final class SessionController: NSObject, NSMenuDelegate {
     /// 供布局重置调用（applyTool 是私有的）
     func applyToolPublic(_ t: ToolKind) { applyTool(t, silent: false) }
 
-    private func applyTool(_ t: ToolKind, silent: Bool) {
-        if t != .zoomIn && t != .zoomOut { previousTool = t }
+    /// 临时工具栈（空格 / ⇧拖动借用别的工具，松开还原）。
+    /// 用栈而不是单个变量：空格和 ⇧拖动可能同时生效，嵌套也能正确还原。
+    private var tempToolStack: [ToolKind] = []
+    var isTemporaryTool: Bool { !tempToolStack.isEmpty }
+
+    /// 临时切到某个工具（不改变"上次使用的工具"记忆）
+    func pushTemporaryTool(_ t: ToolKind) {
+        guard isActive, tool != t else { return }
+        tempToolStack.append(tool)
+        applyTool(t, silent: false, remember: false)
+    }
+
+    /// 还原临时切换
+    func popTemporaryTool() {
+        guard let back = tempToolStack.popLast() else { return }
+        applyTool(back, silent: false, remember: false)
+    }
+
+    private func applyTool(_ t: ToolKind, silent: Bool, remember: Bool = true) {
+        if remember, t != .zoomIn && t != .zoomOut { previousTool = t }
         tool = t
         if t != .magnifier {
             magnifier?.orderOut(nil)
@@ -926,7 +944,7 @@ final class SessionController: NSObject, NSMenuDelegate {
             // 选中放大镜后立刻显示，不必先移动鼠标
             magnifier?.update(canvas: st, at: v.mousePointValue, penSize: penSize)
         }
-        Prefs.lastTool = t
+        if remember { Prefs.lastTool = t }
         views.forEach { $0.refreshCursor(); $0.needsDisplay = true }
         if !silent { syncModel() } else { syncModel() }
     }
@@ -1363,6 +1381,9 @@ final class SessionController: NSObject, NSMenuDelegate {
         case "f": setTool(.region); return true
         case "m": setTool(.magnifier); return true
         case "v": setTool(.select); return true
+        case " ":                       // 空格：临时借用指针，松开还原
+            pushTemporaryTool(.select)
+            return true
         case "n": setTool(.number); return true
         case "s": setTool(.spotlight); return true
         case "u": setTool(.blur); return true

@@ -202,12 +202,12 @@ struct SettingsView: View {
                                 .onSubmit { m.save() }
                         }
                         HStack(spacing: 8) {
-                            Text(LS("Startwerkzeug", "Tool on start", "打开会话时的工具", "開啟對話時的 tool"))
+                            Text(LS("Startwerkzeug", "Tool on start", "打开会话时的工具", "開啟對話時的工具"))
                                 .frame(width: 150, alignment: .leading)
                             Picker("", selection: $m.defaultToolMode) {
+                                Text(LS("Stift", "Pen", "画笔", "畫筆")).tag("pen")
                                 Text(LS("Zeiger (bewegen)", "Pointer (move)", "指针（移动已有标记）", "指標（移動已有標記）")).tag("select")
                                 Text(LS("Zuletzt verwendetes", "Last used", "上次使用的工具", "上次使用的工具")).tag("last")
-                                Text(LS("Stift", "Pen", "画笔", "畫筆")).tag("pen")
                             }.labelsHidden().frame(width: 220)
                         }
                         HStack(spacing: 8) {

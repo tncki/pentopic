@@ -421,6 +421,8 @@ final class CanvasView: NSView {
     let state: CanvasState
     weak var controller: SessionController?
 
+    /// 本次按下是否由 ⇧ 触发了临时指针（鼠标松开时要还原）
+    private var shiftMoveActive = false
     private var marquee: CGRect?            // 框选矩形
     private var marqueeStart: CGPoint?
     private var selectDragLast: CGPoint?
@@ -750,6 +752,14 @@ final class CanvasView: NSView {
         dragRejected = false
         isDragging = false
         let p = pt(event)
+
+        // ⇧ + 在已有笔画上按下 = 临时借用指针来移动它（松开鼠标还原当前工具）。
+        // 按下点为空时不拦截 —— 形状工具的 ⇧ 仍然是"约束为正方形/正圆"。
+        if event.modifierFlags.contains(.shift), c.tool != .select, !state.strokes.isEmpty,
+           state.stroke(at: p) != nil {
+            shiftMoveActive = true
+            c.pushTemporaryTool(.select)
+        }
         dragStart = p
         dragCurrent = p
         mousePoint = p
@@ -984,6 +994,12 @@ final class CanvasView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         guard let c = controller else { return }
+        defer {
+            if shiftMoveActive {
+                shiftMoveActive = false
+                c.popTemporaryTool()
+            }
+        }
         isDragging = false
         if dragRejected { dragRejected = false; live = nil; needsDisplay = true; return }
         if state.isZoomed { lastPan = nil; return }
@@ -1155,6 +1171,15 @@ final class CanvasView: NSView {
     override func keyDown(with event: NSEvent) {
         if controller?.handleKeyDown(event) == true { return }
         super.keyDown(with: event)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        // 空格松开 → 还原借用的指针。没有这一步，空格会变成"按一下永久换工具"。
+        if event.keyCode == 49 {
+            controller?.popTemporaryTool()
+            return
+        }
+        super.keyUp(with: event)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

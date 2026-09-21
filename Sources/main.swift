@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Prefs.registerDefaults()
+        Prefs.migrateDefaultToolIfNeeded()
         L.lang = Prefs.resolveLanguage()
         NSApp.setActivationPolicy(.accessory)
 

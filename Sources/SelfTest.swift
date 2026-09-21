@@ -968,6 +968,81 @@ enum SelfTest {
         check("默认工具：上次使用", Prefs.initialTool == .arrow, Prefs.initialTool.rawValue)
         Prefs.defaultToolMode = savedDefault
 
+        // ---- 4l. 临时工具（空格 / ⇧拖动）----
+        log("")
+        log("[4l] 临时工具切换")
+        sc.clearAll(); pump(0.15)
+        // 出厂默认（注册值）应当是画笔。持久化值可能还是上一版的 "select"，
+        // 那由 Prefs.migrateDefaultToolIfNeeded() 处理。
+        let savedMode2 = Prefs.defaultToolMode
+        UserDefaults.standard.removeObject(forKey: "defaultTool")
+        check("出厂默认工具是画笔", Prefs.initialTool == .pen, Prefs.initialTool.rawValue)
+        // 迁移：旧版的 "select" 应当被视为旧默认值而被丢弃
+        UserDefaults.standard.set("select", forKey: "defaultTool")
+        UserDefaults.standard.removeObject(forKey: "defaultToolMigrated")
+        Prefs.migrateDefaultToolIfNeeded()
+        check("旧版的 select 默认值被迁移掉", Prefs.initialTool == .pen, Prefs.initialTool.rawValue)
+        // 迁移后用户主动选的 select 应当被保留
+        Prefs.defaultToolMode = "select"
+        Prefs.migrateDefaultToolIfNeeded()
+        check("迁移只做一次，之后用户的选择被保留", Prefs.initialTool == .select, Prefs.initialTool.rawValue)
+        Prefs.defaultToolMode = savedMode2
+
+        sc.setTool(.pen); pump(0.1); sc.setSwatch(1); sc.setPenSize(1)
+        drag([CGPoint(x: 400, y: 400), CGPoint(x: 500, y: 460)]); pump(0.15)
+        check("画笔能画", st.strokes.count == 1, "\(st.strokes.count) 条")
+
+        // 空格：临时借用指针，松开还原
+        check("静止时没有临时工具", !sc.isTemporaryTool)
+        sc.pushTemporaryTool(.select); pump(0.1)
+        check("空格 → 临时切到指针", sc.tool == .select && sc.isTemporaryTool, sc.tool.rawValue)
+        check("临时切换不覆盖「上次使用的工具」记忆", Prefs.lastTool == .pen, Prefs.lastTool.rawValue)
+        sc.popTemporaryTool(); pump(0.1)
+        check("松开空格 → 还原画笔", sc.tool == .pen && !sc.isTemporaryTool, sc.tool.rawValue)
+
+        // 嵌套：空格 + ⇧拖动同时生效时也能逐个还原
+        sc.pushTemporaryTool(.select); sc.pushTemporaryTool(.eyedropper); pump(0.1)
+        check("嵌套临时切换", sc.tool == .eyedropper && sc.isTemporaryTool)
+        sc.popTemporaryTool()
+        check("先还原到上一层", sc.tool == .select, sc.tool.rawValue)
+        sc.popTemporaryTool()
+        check("再还原到画笔", sc.tool == .pen, sc.tool.rawValue)
+
+        // ⇧ + 在已有笔画上按下 = 临时移动
+        sc.setTool(.pen); st.selection.removeAll(); pump(0.12)
+        guard let penBefore = st.strokes.first?.shape.bounds else { return }
+        let hit = CGPoint(x: penBefore.midX, y: penBefore.midY)
+        func send(_ type: NSEvent.EventType, _ p: CGPoint, _ f: NSEvent.ModifierFlags) {
+            guard let e = event(type, p, flags: f) else { return }
+            switch type {
+            case .leftMouseDown:    view.mouseDown(with: e)
+            case .leftMouseDragged: view.mouseDragged(with: e)
+            case .leftMouseUp:      view.mouseUp(with: e)
+            default: break
+            }
+        }
+        send(.leftMouseDown, hit, .shift)
+        check("⇧ 在笔画上按下 → 临时变成指针", sc.tool == .select && sc.isTemporaryTool, sc.tool.rawValue)
+        check("⇧ 按下会选中该笔画", st.selection.count == 1, "\(st.selection.count) 个")
+        send(.leftMouseDragged, CGPoint(x: hit.x + 60, y: hit.y + 20), .shift)
+        send(.leftMouseUp, CGPoint(x: hit.x + 60, y: hit.y + 20), .shift)
+        pump(0.15)
+        check("⇧ 拖动移动了笔画",
+              abs((st.strokes.first?.shape.bounds.midX ?? 0) - (penBefore.midX + 60)) < 3,
+              String(format: "%.0f → %.0f", penBefore.midX, st.strokes.first?.shape.bounds.midX ?? 0))
+        check("松开鼠标 → 还原画笔", sc.tool == .pen && !sc.isTemporaryTool, sc.tool.rawValue)
+        check("⇧ 移动后笔画数量不变", st.strokes.count == 1)
+
+        // ⇧ 在空白处按下：仍然是"约束"，不该被拦截
+        st.selection.removeAll(); pump(0.1)
+        sc.setTool(.ellipse); pump(0.1)
+        send(.leftMouseDown, CGPoint(x: 1000, y: 700), .shift)
+        check("⇧ 在空白处不会被拦截成移动", sc.tool == .ellipse, sc.tool.rawValue)
+        send(.leftMouseUp, CGPoint(x: 1100, y: 760), .shift)
+        pump(0.15)
+        sc.clearAll(); pump(0.1)
+        sc.setTool(.pen); sc.setSwatch(0)
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

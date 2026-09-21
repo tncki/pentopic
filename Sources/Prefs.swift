@@ -73,9 +73,11 @@ enum Prefs {
             K.frameStyle: FrameStyle.none.rawValue,
             K.fixedRegion: "",
             K.freeRegion: false,
-            K.defaultTool: "select"
+            K.defaultTool: "pen"
         ])
     }
+
+    // 注册完默认值后做一次性迁移
 
     // MARK: 行为
 
@@ -160,9 +162,9 @@ enum Prefs {
     /// 会话开始时的默认工具：
     /// "select" = 指针（默认，移动/对齐已有标记）
     /// "last"   = 上次用过的工具
-    /// "pen"    = 画笔
+    /// "pen"    = 画笔（默认）
     static var defaultToolMode: String {
-        get { d.string(forKey: K.defaultTool) ?? "select" }
+        get { d.string(forKey: K.defaultTool) ?? "pen" }
         set { d.set(newValue, forKey: K.defaultTool) }
     }
 
@@ -173,6 +175,17 @@ enum Prefs {
         case "pen":  return .pen
         default:     return .select
         }
+    }
+
+    /// 一次性迁移：`defaultTool` 引入时的默认值是 "select"（指针），
+    /// 一版之后改成了 "pen"（画笔）。旧值不是用户主动选的，而是被设置窗口写进
+    /// UserDefaults 的 —— 不迁移的话，改默认值对已有用户完全不起作用，
+    /// 表现为"我明明改了代码，行为却没变"。
+    static func migrateDefaultToolIfNeeded() {
+        let flag = "defaultToolMigrated"
+        guard !d.bool(forKey: flag) else { return }
+        if d.string(forKey: K.defaultTool) == "select" { d.removeObject(forKey: K.defaultTool) }
+        d.set(true, forKey: flag)
     }
 
     /// 固定尺寸选区，形如 "800x600"。空 = 自由拖拽。

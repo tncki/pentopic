@@ -799,13 +799,13 @@ final class SessionController: NSObject, NSMenuDelegate {
         model.penSizeIndex = penSizeIndex
         model.swatches = Palette.all
         model.zoomFactor = activeCanvas?.zoom ?? 1
-        model.canUndo = !(activeCanvas?.strokes.isEmpty ?? true)
-        model.canRedo = !(activeCanvas?.undoneStrokes.isEmpty ?? true)
+        model.canUndo = activeCanvas?.canUndo ?? false
+        model.canRedo = activeCanvas?.canRedo ?? false
         // 用实际存在的选中笔画数，而不是 id 集合的大小（可能有悬空引用）；
         // 且只在指针工具下才算"有选择" —— 别的工具下选择不可见也不可操作。
         if let st = activeCanvas { st.pruneSelection() }
         model.selectedCount = tool == .select ? (activeCanvas?.selectedStrokes.count ?? 0) : 0
-        model.hasStrokes = model.canUndo
+        model.hasStrokes = !(activeCanvas?.strokes.isEmpty ?? true)
         model.hasRegion = activeCanvas.map { $0.region != nil || $0.regionPath != nil } ?? false
         model.screenName = activeCanvas?.screen.localizedName ?? ""
     }
@@ -1002,22 +1002,14 @@ final class SessionController: NSObject, NSMenuDelegate {
     // MARK: 动作
 
     func undo() {
-        guard let st = activeCanvas, let last = st.strokes.last else { return }
-        st.strokes.removeLast()
-        st.undoneStrokes.append(last)      // 记住被撤销的，供重做
-        st.pruneSelection()
-        st.rebuild()
+        guard let st = activeCanvas, st.undoEdit() else { return }
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
         syncModel()
     }
 
     func redo() {
-        guard let st = activeCanvas, let next = st.undoneStrokes.last else { return }
-        st.undoneStrokes.removeLast()
-        st.strokes.append(next)
-        st.pruneSelection()
-        st.rebuild()
+        guard let st = activeCanvas, st.redoEdit() else { return }
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
         syncModel()
@@ -1025,10 +1017,12 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     func clearAll() {
         guard let st = activeCanvas else { return }
+        st.beginEdit()
         st.strokes.removeAll()
-        st.undoneStrokes.removeAll()
         st.selection.removeAll()
         st.layer.clear()
+        // clear 是直接抹图层，快照恢复后要重放一遍才对
+        st.rebuild()
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
         syncModel()
@@ -1128,9 +1122,9 @@ final class SessionController: NSObject, NSMenuDelegate {
     func deleteSelection() {
         guard let st = activeCanvas, !st.selection.isEmpty else { return }
         let n = st.selection.count
+        st.beginEdit()
         st.strokes.removeAll { st.selection.contains($0.id) }
         st.selection.removeAll()
-        st.undoneStrokes.removeAll()
         selectionChanged(st)
         flashStatus(LS("\(n) Objekt(e) gelöscht", "\(n) object(s) deleted",
                        "已删除 \(n) 个对象", "已刪除 \(n) 個物件"))
@@ -1138,6 +1132,7 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     func nudgeSelection(dx: CGFloat, dy: CGFloat) {
         guard let st = activeCanvas, !st.selection.isEmpty else { return }
+        st.beginEdit()
         st.moveSelection(dx: dx, dy: dy)
         views.forEach { $0.needsDisplay = true }
     }
@@ -1160,6 +1155,7 @@ final class SessionController: NSObject, NSMenuDelegate {
             if abs(dx) > 0.01 || abs(dy) > 0.01 { deltas[s.id] = CGPoint(x: dx, y: dy) }
         }
         guard !deltas.isEmpty else { return }
+        st.beginEdit()
         st.strokes = st.strokes.map { s in
             guard let d = deltas[s.id] else { return s }
             return s.translated(dx: d.x, dy: d.y)
@@ -1185,6 +1181,7 @@ final class SessionController: NSObject, NSMenuDelegate {
             deltas[s.id] = horizontal ? CGPoint(x: want - cur, y: 0) : CGPoint(x: 0, y: want - cur)
         }
         guard !deltas.isEmpty else { return }
+        st.beginEdit()
         st.strokes = st.strokes.map { s in
             guard let d = deltas[s.id] else { return s }
             return s.translated(dx: d.x, dy: d.y)
@@ -1196,6 +1193,7 @@ final class SessionController: NSObject, NSMenuDelegate {
     func groupSelection() {
         guard let st = activeCanvas, st.selection.count > 1 else { return }
         let g = UUID()
+        st.beginEdit()
         st.strokes = st.strokes.map { s in
             guard st.selection.contains(s.id) else { return s }
             var c = s; c.groupID = g; return c
@@ -1209,6 +1207,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         guard let st = activeCanvas else { return }
         let groups = Set(st.selectedStrokes.compactMap { $0.groupID })
         guard !groups.isEmpty else { return }
+        st.beginEdit()
         st.strokes = st.strokes.map { s in
             guard let g = s.groupID, groups.contains(g) else { return s }
             var c = s; c.groupID = nil; return c
@@ -1222,6 +1221,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         guard let st = activeCanvas, !st.selection.isEmpty else { return }
         let sel = st.strokes.filter { st.selection.contains($0.id) }
         let rest = st.strokes.filter { !st.selection.contains($0.id) }
+        st.beginEdit()
         st.strokes = toFront ? rest + sel : sel + rest
         selectionChanged(st)
     }

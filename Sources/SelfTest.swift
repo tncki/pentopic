@@ -488,7 +488,7 @@ enum SelfTest {
         sc.redo(); sc.redo()
         check("重做恢复撤销的笔画", st.strokes.count == beforeRedo,
               "\(beforeRedo) → 撤销后 \(afterUndo) → 重做后 \(st.strokes.count)")
-        check("重做栈已清空", st.undoneStrokes.isEmpty)
+        check("重做栈已清空", !st.canRedo)
         sc.redo()
         check("无可重做时 redo 是安全的空操作", st.strokes.count == beforeRedo)
 
@@ -1123,6 +1123,94 @@ enum SelfTest {
         check("撤销后选择里没有悬空 id", st.selectedStrokes.count == 0,
               "selectedStrokes=\(st.selectedStrokes.count) 原始 id 数=\(st.selection.count)")
         check("模型选中数同步归零", sc.modelSelectedCount == 0, "\(sc.modelSelectedCount)")
+
+        sc.clearAll(); pump(0.15)
+        sc.setTool(.pen); sc.setSwatch(0)
+
+        // ---- 4n. 编辑操作的撤销（快照式）----
+        // 用户报的 bug：选中几条笔画删除后，撤销不起作用。
+        // 根因是撤销只能"弹掉最后一条"，而删除改的是数组中间。
+        log("")
+        log("[4n] 编辑操作的撤销")
+        sc.clearAll(); pump(0.2)
+
+        func drawThree() {
+            sc.setTool(.rectFilled); sc.setPenSize(1); sc.setSwatch(1)
+            drag([CGPoint(x: 200, y: 200), CGPoint(x: 300, y: 280)]); pump(0.12)
+            drag([CGPoint(x: 500, y: 200), CGPoint(x: 600, y: 280)]); pump(0.12)
+            drag([CGPoint(x: 800, y: 200), CGPoint(x: 900, y: 280)]); pump(0.12)
+        }
+
+        // 1) 删除 → 撤销
+        drawThree()
+        check("画了三条", st.strokes.count == 3, "\(st.strokes.count)")
+        sc.setTool(.select); pump(0.12)
+        st.selection = [st.strokes[1].id]          // 选中**中间**那条
+        pump(0.1)
+        sc.deleteSelection(); pump(0.15)
+        check("删除了中间一条", st.strokes.count == 2, "\(st.strokes.count)")
+        check("删除后可以撤销", st.canUndo)
+        sc.undo(); pump(0.2)
+        check("撤销恢复了被删的笔画", st.strokes.count == 3, "\(st.strokes.count)")
+        check("恢复的是原来那条（不是弹掉别的）",
+              st.strokes.count == 3 && abs(st.strokes[1].shape.bounds.minX - 500) < 2,
+              st.strokes.count == 3 ? String(format: "中间那条 minX=%.0f", st.strokes[1].shape.bounds.minX) : "数量不对")
+        sc.redo(); pump(0.2)
+        check("重做再次删除", st.strokes.count == 2, "\(st.strokes.count)")
+        sc.undo(); pump(0.2)
+
+        // 2) 对齐 → 撤销
+        sc.setTool(.select); sc.selectAll(); pump(0.15)
+        let beforeAlign = st.selectedStrokes.map { $0.shape.bounds.minX }.sorted()
+        sc.alignSelection(.left); pump(0.2)
+        check("对齐改变了位置", st.selectedStrokes.map { $0.shape.bounds.minX }.sorted() != beforeAlign)
+        sc.undo(); pump(0.2)
+        check("撤销恢复了对齐前的位置",
+              st.selectedStrokes.map { $0.shape.bounds.minX }.sorted() == beforeAlign,
+              st.selectedStrokes.map { String(format: "%.0f", $0.shape.bounds.minX) }.joined(separator: ", "))
+
+        // 3) 拖动移动 → 撤销（整次拖动只记一条）
+        sc.selectAll(); pump(0.1)
+        let beforeMove = st.strokes.map { $0.shape.bounds.minX }.sorted()
+        let undoDepthBefore = st.undoStack.count
+        guard let start = st.selectionBounds.map({ CGPoint(x: $0.midX, y: $0.midY) }) else { return }
+        func sendSel(_ t: NSEvent.EventType, _ p: CGPoint) {
+            guard let e = event(t, p, flags: []) else { return }
+            switch t {
+            case .leftMouseDown:    view.mouseDown(with: e)
+            case .leftMouseDragged: view.mouseDragged(with: e)
+            case .leftMouseUp:      view.mouseUp(with: e)
+            default: break
+            }
+        }
+        sendSel(.leftMouseDown, start)
+        for i in 1...5 { sendSel(.leftMouseDragged, CGPoint(x: start.x + CGFloat(i) * 12, y: start.y)) }
+        sendSel(.leftMouseUp, CGPoint(x: start.x + 60, y: start.y))
+        pump(0.2)
+        check("拖动确实移动了", st.strokes.map { $0.shape.bounds.minX }.sorted() != beforeMove)
+        check("整次拖动只记一条撤销", st.undoStack.count == undoDepthBefore + 1,
+              "\(undoDepthBefore) → \(st.undoStack.count)")
+        sc.undo(); pump(0.2)
+        check("撤销恢复拖动前的位置",
+              st.strokes.map { $0.shape.bounds.minX }.sorted() == beforeMove)
+
+        // 4) 组合 → 撤销
+        sc.selectAll(); pump(0.1)
+        sc.groupSelection(); pump(0.15)
+        check("组合生效", st.strokes.allSatisfy { $0.groupID != nil })
+        sc.undo(); pump(0.2)
+        check("撤销取消组合", st.strokes.allSatisfy { $0.groupID == nil })
+
+        // 5) 一次删除多条 → 一次撤销全部恢复
+        sc.clearAll(); pump(0.15)
+        drawThree()
+        let allIDs = st.strokes.map { $0.id }
+        sc.selectAll(); pump(0.1)
+        sc.deleteSelection(); pump(0.15)
+        check("全部删除", st.strokes.isEmpty)
+        sc.undo(); pump(0.2)
+        check("一次撤销恢复全部三条", st.strokes.count == 3, "\(st.strokes.count)")
+        check("恢复的是原来那三条", st.strokes.map { $0.id } == allIDs)
 
         sc.clearAll(); pump(0.15)
         sc.setTool(.pen); sc.setSwatch(0)

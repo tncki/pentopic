@@ -15,8 +15,51 @@ final class CanvasState {
     let layer: AnnotationLayer
 
     var strokes: [Stroke] = []
-    /// 已撤销的笔画（用于重做）。任何新笔画都会清空它 —— 这是撤销栈的标准语义。
-    var undoneStrokes: [Stroke] = []
+    /// 撤销 / 重做栈，存的是**整份笔画快照**。
+    ///
+    /// 早先的实现直接在 `strokes` 上 `removeLast()`，只能表示"追加"这一种操作。
+    /// 而删除、对齐、移动、组合改的都是数组中间的元素 —— 撤销会弹掉另一条笔画，
+    /// 删除因此完全不可撤销。快照能统一表示所有修改，也是唯一能覆盖编辑功能的做法。
+    var undoStack: [[Stroke]] = []
+    var redoStack: [[Stroke]] = []
+
+    /// 快照数量上限。一份快照就是一组值类型，笔画多时也才几百 KB，
+    /// 但没必要无限留。
+    private static let undoLimit = 60
+
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
+    /// 在任何会修改 strokes 的操作**之前**调用
+    func beginEdit() { pushUndoSnapshot(strokes) }
+
+    /// 推入一份**事先捕获**的快照。
+    /// 拖动这类连续操作只在开始时捕获一次，否则每个鼠标移动都会记一条。
+    func pushUndoSnapshot(_ snapshot: [Stroke]) {
+        undoStack.append(snapshot)
+        if undoStack.count > Self.undoLimit { undoStack.removeFirst() }
+        redoStack.removeAll()
+    }
+
+    @discardableResult
+    func undoEdit() -> Bool {
+        guard let prev = undoStack.popLast() else { return false }
+        redoStack.append(strokes)
+        strokes = prev
+        pruneSelection()
+        rebuild()
+        return true
+    }
+
+    @discardableResult
+    func redoEdit() -> Bool {
+        guard let next = redoStack.popLast() else { return false }
+        undoStack.append(strokes)
+        strokes = next
+        pruneSelection()
+        rebuild()
+        return true
+    }
     var region: CGRect?
     /// 自由手绘选区（多边形，画布局部坐标）。非空时优先于 region。
     var regionPath: [CGPoint]?
@@ -434,6 +477,9 @@ final class CanvasView: NSView {
     private var marquee: CGRect?            // 框选矩形
     private var marqueeStart: CGPoint?
     private var selectDragLast: CGPoint?
+    /// 拖动开始前的笔画快照。整次拖动只记一条撤销，而不是每个鼠标移动记一条。
+    private var dragUndoSnapshot: [Stroke]?
+    private var dragDidMove = false
     private var live: Stroke?
     private var livePoints: [CGPoint] = []
     private var dragStart: CGPoint = .zero
@@ -954,8 +1000,10 @@ final class CanvasView: NSView {
             needsDisplay = true
         case .select:
             if let last = selectDragLast {
+                if dragUndoSnapshot == nil { dragUndoSnapshot = state.strokes }
                 state.moveSelection(dx: p.x - last.x, dy: p.y - last.y)
                 selectDragLast = p
+                dragDidMove = true
             } else if let start = marqueeStart {
                 marquee = makeRect(start, p, constrain: false)
             }
@@ -1022,9 +1070,9 @@ final class CanvasView: NSView {
             let pts = livePoints
             live = nil
             if pts.count > 1 {
+                state.beginEdit()
                 state.strokes.append(Stroke(shape: .freehand(pts), color: .black,
                                             width: c.penSize * 2.2, isEraser: true))
-                state.undoneStrokes.removeAll()
                 c.didChangeStrokes(state)
             }
         case .line, .arrow, .doubleArrow, .rect, .rectFilled, .ellipse, .ellipseFilled:
@@ -1037,6 +1085,10 @@ final class CanvasView: NSView {
                 for h in hits { ids.formUnion(state.expandGroup(of: h)) }
                 if shift { state.selection.formUnion(ids) } else { state.selection = ids }
             }
+            // 整次拖动结束后再入栈；没真正移动过就不记，避免留下空操作
+            if dragDidMove, let snap = dragUndoSnapshot { state.pushUndoSnapshot(snap) }
+            dragUndoSnapshot = nil
+            dragDidMove = false
             marquee = nil; marqueeStart = nil; selectDragLast = nil
             c.syncModel()
             needsDisplay = true
@@ -1073,8 +1125,8 @@ final class CanvasView: NSView {
     }
 
     private func commit(_ s: Stroke) {
+        state.beginEdit()                    // 先存快照，再改
         state.strokes.append(s)
-        state.undoneStrokes.removeAll()      // 新操作让重做栈失效
         if case .spotlight = s.shape {
             // 新的聚焦要让旧的失效，必须整体重放（增量 apply 撤不掉旧的那一层压暗）
             state.rebuild()

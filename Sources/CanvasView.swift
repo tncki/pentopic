@@ -49,6 +49,14 @@ final class CanvasState {
         return Set(strokes.filter { $0.groupID == g }.map { $0.id })
     }
 
+    /// 丢掉已经不存在的笔画 id。
+    /// 撤销 / 清空之后 selection 里会留下悬空引用 —— 计数会虚高，
+    /// `selection.count` 也就不再等于"选中的笔画数"。
+    func pruneSelection() {
+        let alive = Set(strokes.map { $0.id })
+        selection.formIntersection(alive)
+    }
+
     /// 平移选中的笔画
     func moveSelection(dx: CGFloat, dy: CGFloat) {
         guard !selection.isEmpty, dx != 0 || dy != 0 else { return }
@@ -570,6 +578,9 @@ final class CanvasView: NSView {
 
     /// 选中笔画的虚线框 + 整体包围盒
     private func drawSelection(_ ctx: CGContext) {
+        // 选择是**指针工具的编辑状态**：切到别的工具后不该继续显示虚线框。
+        // 选择本身就留着 —— 切回指针还能继续用，省得重新框一遍。
+        guard controller?.tool == .select else { return }
         let sel = state.selectedStrokes
         guard !sel.isEmpty else { return }
         ctx.saveGState()

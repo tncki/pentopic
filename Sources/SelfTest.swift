@@ -1043,6 +1043,90 @@ enum SelfTest {
         sc.clearAll(); pump(0.1)
         sc.setTool(.pen); sc.setSwatch(0)
 
+        // ---- 4m. 选择框只属于指针工具 ----
+        // 这个 bug 是视觉的：切走工具后虚线框还留在屏幕上。
+        // 所以要真的渲染视图做差分，光看状态是测不出来的。
+        log("")
+        log("[4m] 选择框与工具的绑定")
+        sc.clearAll(); pump(0.2)
+        sc.setTool(.rectFilled); sc.setPenSize(2); sc.setSwatch(1)
+        drag([CGPoint(x: 300, y: 300), CGPoint(x: 460, y: 420)]); pump(0.15)
+        drag([CGPoint(x: 600, y: 340), CGPoint(x: 740, y: 460)]); pump(0.15)
+
+        func viewCG() -> CGImage? {
+            view.layoutSubtreeIfNeeded()
+            view.displayIfNeeded()
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            return rep.cgImage
+        }
+        /// 两张渲染图的差异像素数（按步长抽样，够快又够灵敏）
+        func diffCount(_ a: CGImage, _ b: CGImage) -> Int {
+            guard a.width == b.width, a.height == b.height else { return -1 }
+            var n = 0
+            for y in stride(from: 0, to: a.height, by: 7) {
+                for x in stride(from: 0, to: a.width, by: 7) {
+                    let ca = PixelSampler.color(of: a, at: CGPoint(x: x, y: y))?.usingColorSpace(.sRGB)
+                    let cb = PixelSampler.color(of: b, at: CGPoint(x: x, y: y))?.usingColorSpace(.sRGB)
+                    if ca?.hexString != cb?.hexString { n += 1 }
+                }
+            }
+            return n
+        }
+
+        // 指针下选中两个对象
+        sc.setTool(.select); pump(0.15)
+        drag([CGPoint(x: 200, y: 200), CGPoint(x: 900, y: 600)]); pump(0.2)
+        check("已在指针下选中两个对象", st.selection.count == 2, "\(st.selection.count) 个")
+        let withBox = viewCG()
+
+        // 切到画笔：虚线框必须消失
+        sc.setTool(.pen); pump(0.25)
+        check("切到画笔后选中数归零（不再可见/可操作）", sc.modelSelectedCount == 0,
+              "\(sc.modelSelectedCount)")
+        let noBox = viewCG()
+        if let a = withBox, let b = noBox {
+            let d = diffCount(a, b)
+            check("切换工具后画面确实变了（虚线框被抹掉）", d > 0, "\(d) 个像素不同")
+            check("画面变化量很小（只抹掉了选择框，不是整屏重绘）", d < 40000, "\(d) 个像素")
+        } else {
+            check("能渲染画布做差分", false)
+        }
+
+        // 切换两个都不带选择的工具：画面应当完全一致（对照）
+        sc.setTool(.ellipse); pump(0.25)
+        let a2 = viewCG()
+        sc.setTool(.arrow); pump(0.25)
+        let a3 = viewCG()
+        if let x = a2, let y = a3 {
+            check("对照：两个非指针工具之间切换画面不变", diffCount(x, y) == 0,
+                  "\(diffCount(x, y)) 个像素不同")
+        }
+
+        // 切回指针：选择应当还在
+        sc.setTool(.select); pump(0.2)
+        check("切回指针后选择被保留（不用重新框）", st.selection.count == 2,
+              "\(st.selection.count) 个")
+
+        // 非指针工具下 Delete 不该删掉看不见的选区
+        sc.setTool(.pen); pump(0.15)
+        let countBeforeDel = st.strokes.count
+        let handled = sc.handleKeyDownForTest(keyCode: 51)   // Delete
+        check("非指针工具下 Delete 不作用", !handled && st.strokes.count == countBeforeDel,
+              "handled=\(handled) 笔画 \(countBeforeDel) → \(st.strokes.count)")
+
+        // 悬空 id：撤销掉被选中的笔画后，选中数不能虚高
+        sc.setTool(.select); pump(0.15)
+        sc.selectAll(); pump(0.1)
+        check("全选两个", st.selection.count == 2)
+        sc.undo(); sc.undo(); pump(0.2)
+        check("撤销后选择里没有悬空 id", st.selectedStrokes.count == 0,
+              "selectedStrokes=\(st.selectedStrokes.count) 原始 id 数=\(st.selection.count)")
+        check("模型选中数同步归零", sc.modelSelectedCount == 0, "\(sc.modelSelectedCount)")
+
+        sc.clearAll(); pump(0.15)
+        sc.setTool(.pen); sc.setSwatch(0)
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

@@ -801,7 +801,10 @@ final class SessionController: NSObject, NSMenuDelegate {
         model.zoomFactor = activeCanvas?.zoom ?? 1
         model.canUndo = !(activeCanvas?.strokes.isEmpty ?? true)
         model.canRedo = !(activeCanvas?.undoneStrokes.isEmpty ?? true)
-        model.selectedCount = activeCanvas?.selection.count ?? 0
+        // 用实际存在的选中笔画数，而不是 id 集合的大小（可能有悬空引用）；
+        // 且只在指针工具下才算"有选择" —— 别的工具下选择不可见也不可操作。
+        if let st = activeCanvas { st.pruneSelection() }
+        model.selectedCount = tool == .select ? (activeCanvas?.selectedStrokes.count ?? 0) : 0
         model.hasStrokes = model.canUndo
         model.hasRegion = activeCanvas.map { $0.region != nil || $0.regionPath != nil } ?? false
         model.screenName = activeCanvas?.screen.localizedName ?? ""
@@ -916,6 +919,16 @@ final class SessionController: NSObject, NSMenuDelegate {
     /// 供布局重置调用（applyTool 是私有的）
     func applyToolPublic(_ t: ToolKind) { applyTool(t, silent: false) }
 
+    // MARK: 自检钩子
+    var modelSelectedCount: Int { model.selectedCount }
+    func handleKeyDownForTest(keyCode: UInt16) -> Bool {
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                       timestamp: 0, windowNumber: 0, context: nil,
+                                       characters: "", charactersIgnoringModifiers: "",
+                                       isARepeat: false, keyCode: keyCode) else { return false }
+        return handleKeyDown(e)
+    }
+
     /// 临时工具栈（空格 / ⇧拖动借用别的工具，松开还原）。
     /// 用栈而不是单个变量：空格和 ⇧拖动可能同时生效，嵌套也能正确还原。
     private var tempToolStack: [ToolKind] = []
@@ -992,6 +1005,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         guard let st = activeCanvas, let last = st.strokes.last else { return }
         st.strokes.removeLast()
         st.undoneStrokes.append(last)      // 记住被撤销的，供重做
+        st.pruneSelection()
         st.rebuild()
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
@@ -1002,6 +1016,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         guard let st = activeCanvas, let next = st.undoneStrokes.last else { return }
         st.undoneStrokes.removeLast()
         st.strokes.append(next)
+        st.pruneSelection()
         st.rebuild()
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
@@ -1012,6 +1027,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         guard let st = activeCanvas else { return }
         st.strokes.removeAll()
         st.undoneStrokes.removeAll()
+        st.selection.removeAll()
         st.layer.clear()
         st.invalidateZoomCache()
         views.forEach { $0.needsDisplay = true }
@@ -1299,13 +1315,17 @@ final class SessionController: NSObject, NSMenuDelegate {
         case "z":
             if event.modifierFlags.contains(.shift) { redo() } else { undo() }
             return true
+        // 下面这些只作用于"选择"，而选择只在指针工具下可见 ——
+        // 否则会对着一个看不见的选区生效，那是很容易误删的。
         case "a" where event.modifierFlags.contains(.command):
+            guard tool == .select else { return false }
             selectAll(); return true
         case "g" where event.modifierFlags.contains(.command):
+            guard tool == .select else { return false }
             if event.modifierFlags.contains(.shift) { ungroupSelection() } else { groupSelection() }
             return true
         case "\u{7F}", "\u{8}":      // Delete / Backspace
-            guard activeCanvas?.selection.isEmpty == false else { return false }
+            guard tool == .select, activeCanvas?.selection.isEmpty == false else { return false }
             deleteSelection(); return true
         case "c": Exporter.copyToClipboard(activeCanvas); return true
         case "v": pasteFromClipboard(); return true

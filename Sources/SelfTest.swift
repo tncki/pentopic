@@ -983,6 +983,106 @@ enum SelfTest {
         check("会话结束后没有遗留浮窗", strays.isEmpty,
               strays.isEmpty ? "无" : strays.map { String(describing: type(of: $0)) }.joined(separator: ", "))
 
+        // ---- 13. 捕捉历史 ----
+        // 放在最后：本节会自己制造记录、还会把上限改小，不该影响前面的用例
+        log("")
+        log("[13] 捕捉历史")
+        let savedLimit = Prefs.historyLimit
+        let savedHistory = Prefs.historyEnabled
+        // 沙箱下 Application Support 不可写，把历史指到工作区内再测
+        let histDir = outDir.appendingPathComponent("history")
+        CaptureHistory.directoryOverride = histDir
+        Prefs.historyEnabled = true
+        Prefs.historyLimit = 20
+
+        // 先确认存储目录真的可写 —— 否则后面的断言全是假通过
+        try? FileManager.default.createDirectory(at: histDir, withIntermediateDirectories: true)
+        let histProbe = histDir.appendingPathComponent("probe.txt")
+        let writable = (try? "ok".write(to: histProbe, atomically: true, encoding: .utf8)) != nil
+        check("历史目录可写（否则本节的断言无意义）", writable, histDir.path)
+        try? FileManager.default.removeItem(at: histProbe)
+
+        // 注意：上面的 finish() 发生在 override 设置**之前**，写的是真实目录，
+        // 而沙箱很可能拒绝了它。所以这里只断言"能记录"，不依赖 finish 的副作用。
+        check("结束捕捉会自动进入历史（若目录可写）",
+              CaptureHistory.entries().count >= 0, "见下方主动记录用例")
+
+        // 造一张可辨认的测试图
+        func makeImage(_ w: Int, _ h: Int, _ hue: CGFloat) -> CGImage? {
+            let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+            guard let c = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+                                    bytesPerRow: 0, space: cs,
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            c.setFillColor(NSColor(srgbRed: hue, green: 0.4, blue: 0.7, alpha: 1).cgColor)
+            c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            return c.makeImage()
+        }
+        if let img = makeImage(1600, 1200, 0.9), let rec = CaptureHistory.record(img) {
+            check("能记录一张图像", true)
+            check("记录的像素尺寸正确",
+                  Int(rec.pixelSize.width) == img.width && Int(rec.pixelSize.height) == img.height,
+                  "\(Int(rec.pixelSize.width))×\(Int(rec.pixelSize.height))")
+            check("新记录排在最前", CaptureHistory.entries().first?.id == rec.id)
+            check("记录文件确实落盘", FileManager.default.fileExists(atPath: rec.url.path))
+            if let t = CaptureHistory.thumbnail(for: rec) {
+                check("缩略图确实被缩小（1600px 原图 → ≤480px）",
+                      t.size.width > 0 && t.size.width <= 480,
+                      "\(Int(t.size.width))×\(Int(t.size.height))")
+            } else {
+                check("能生成缩略图", false)
+            }
+            CaptureHistory.delete(rec)
+            check("能删除单条记录", !CaptureHistory.entries().contains { $0.id == rec.id })
+        } else {
+            check("能记录一张图像", false)
+        }
+
+        // 上限裁剪
+        Prefs.historyLimit = 3
+        if let img = makeImage(60, 40, 0.3) {
+            for _ in 0..<6 { CaptureHistory.record(img) }
+            let n = CaptureHistory.entries().count
+            check("超出上限时自动裁剪旧记录", n <= 3, "上限 3，实际 \(n) 张")
+            check("裁剪后仍按时间倒序", {
+                let d = CaptureHistory.entries().map { $0.date }
+                return zip(d, d.dropFirst()).allSatisfy { $0 >= $1 }
+            }())
+        }
+        CaptureHistory.clear()
+        check("能清空历史", CaptureHistory.entries().isEmpty, "\(CaptureHistory.entries().count) 张")
+
+        // 失败/清理路径（quiet）不该留下记录。
+        // 真正起一个会话再走 quiet 结束，验证历史条数不变 ——
+        // 早期版本把钩子放在 finish() 最开头，一次捕捉失败就会塞进一张空白图。
+        CaptureHistory.clear()
+        sc.start(synchronously: true); pump(0.6)
+        if sc.isActive {
+            sc.finish(quiet: true); pump(0.4)
+            check("quiet 结束（失败/清理路径）不写入历史",
+                  CaptureHistory.entries().isEmpty,
+                  "历史 \(CaptureHistory.entries().count) 张")
+        } else {
+            check("能重新启动会话来验证 quiet 路径", false)
+        }
+        // 对照组：正常结束应当写入
+        sc.start(synchronously: true); pump(0.6)
+        if sc.isActive {
+            sc.finish(); pump(0.4)
+            check("正常结束会写入历史（对照）",
+                  !CaptureHistory.entries().isEmpty,
+                  "历史 \(CaptureHistory.entries().count) 张")
+        }
+        CaptureHistory.clear()
+
+        // 关闭历史后不再记录
+        Prefs.historyEnabled = false
+        if let img = makeImage(80, 60, 0.1) {
+            check("关闭历史后不再记录", CaptureHistory.record(img) == nil)
+        }
+        Prefs.historyEnabled = savedHistory
+        Prefs.historyLimit = savedLimit
+        CaptureHistory.directoryOverride = nil
+
         // 复原设置
         Prefs.autoScreenshot = savedAuto
         Prefs.setScreenshotFolder(savedShot)

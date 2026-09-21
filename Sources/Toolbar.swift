@@ -359,10 +359,16 @@ struct ToolbarView: View {
                 mailMenu
             }
             HStack(spacing: 3) {
+                ActionButton(symbol: "clock.arrow.circlepath",
+                             help: LS("Aufnahmeverlauf", "Capture history", "捕捉历史", "捕捉歷史")) {
+                    HistoryWindowController.shared.show()
+                }
                 ActionButton(symbol: "info.circle",
                              help: LS("Info & Einstellungen", "Info & settings", "信息与设置", "資訊與設定")) {
                     SettingsWindowController.shared.show()
                 }
+            }
+            HStack(spacing: 3) {
                 Menu {
                     Button(LS("Auf Auswahl zuschneiden", "Crop to selection",
                               "裁剪到选区", "裁剪到選取範圍")) {

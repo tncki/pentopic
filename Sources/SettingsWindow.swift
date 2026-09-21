@@ -18,6 +18,8 @@ final class SettingsModel: ObservableObject {
     @Published var extraColors: [String] = []
     @Published var filenameTemplate = "{app}-{date}-{time}"
     @Published var captureDelay = 0
+    @Published var historyEnabled = true
+    @Published var historyLimit = 20
     @Published var hotKeySpec: HotKeySpec = .default
     @Published var hotKeyWarning: String?
 
@@ -37,6 +39,8 @@ final class SettingsModel: ObservableObject {
         extraColors = Prefs.extraColors
         filenameTemplate = Prefs.filenameTemplate
         captureDelay = Prefs.captureDelay
+        historyEnabled = Prefs.historyEnabled
+        historyLimit = Prefs.historyLimit
         hotKeySpec = Prefs.hotKeySpec
         hotKeyWarning = Prefs.hotKeySpec.conflictWarning
     }
@@ -58,6 +62,9 @@ final class SettingsModel: ObservableObject {
         Prefs.setEmailFolder(URL(fileURLWithPath: (emailFolder as NSString).expandingTildeInPath))
         Prefs.filenameTemplate = filenameTemplate.isEmpty ? "{app}-{date}-{time}" : filenameTemplate
         Prefs.captureDelay = captureDelay
+        Prefs.historyEnabled = historyEnabled
+        Prefs.historyLimit = historyLimit
+        CaptureHistory.prune()
         Prefs.extraColors = extraColors
         Prefs.ensureFolders()
         if hotKeySpec != Prefs.hotKeySpec {
@@ -160,6 +167,24 @@ struct SettingsView: View {
                                 Text("5 s").tag(5)
                                 Text("10 s").tag(10)
                             }.labelsHidden().frame(width: 120)
+                        }
+                    }
+
+                    group(LS("Aufnahmeverlauf", "Capture history", "捕捉历史", "捕捉歷史")) {
+                        Toggle(LS("Jede beendete Aufnahme automatisch sichern",
+                                  "Save every finished capture automatically",
+                                  "每次结束捕捉时自动存档",
+                                  "每次結束捕捉時自動存檔"),
+                               isOn: $m.historyEnabled)
+                        HStack(spacing: 8) {
+                            Text(LS("Behalten", "Keep", "保留张数", "保留張數"))
+                                .frame(width: 150, alignment: .leading)
+                            Picker("", selection: $m.historyLimit) {
+                                ForEach([5, 10, 20, 50, 100], id: \.self) { Text("\($0)").tag($0) }
+                            }.labelsHidden().frame(width: 100)
+                            Button(LS("Verlauf öffnen …", "Open history …", "打开历史 …", "開啟歷史 …")) {
+                                HistoryWindowController.shared.show()
+                            }
                         }
                     }
 

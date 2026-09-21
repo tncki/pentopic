@@ -27,6 +27,8 @@ enum Prefs {
         static let shapeSlots = "shapeSlots"
         static let filenameTemplate = "filenameTemplate"
         static let captureDelay = "captureDelay"
+        static let historyEnabled = "historyEnabled"
+        static let historyLimit = "historyLimit"
         static let language = "language"
         static let hotKeyCode = "hotKeyCode"
         static let hotKeyModifiers = "hotKeyModifiers"
@@ -57,7 +59,9 @@ enum Prefs {
             K.lastSwatch: 0,
             K.lastPenSize: 1,
             K.filenameTemplate: "{app}-{date}-{time}",
-            K.captureDelay: 0
+            K.captureDelay: 0,
+            K.historyEnabled: true,
+            K.historyLimit: 20
         ])
     }
 
@@ -133,6 +137,18 @@ enum Prefs {
     static var captureDelay: Int {
         get { max(0, min(30, d.integer(forKey: K.captureDelay))) }
         set { d.set(newValue, forKey: K.captureDelay) }
+    }
+
+    /// 是否把每次结束的捕捉存进历史
+    static var historyEnabled: Bool {
+        get { d.object(forKey: K.historyEnabled) as? Bool ?? true }
+        set { d.set(newValue, forKey: K.historyEnabled) }
+    }
+
+    /// 历史保留张数（超出后自动删除最旧的）
+    static var historyLimit: Int {
+        get { let v = d.integer(forKey: K.historyLimit); return v > 0 ? min(500, v) : 20 }
+        set { d.set(max(1, min(500, newValue)), forKey: K.historyLimit) }
     }
 
     /// 用户右键改过的标准色槽位（空数组 = 全用默认色）

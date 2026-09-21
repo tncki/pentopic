@@ -596,6 +596,16 @@ final class SessionController: NSObject, NSMenuDelegate {
         guard isActive else { return }
         views.forEach { $0.commitPendingEdit() }
 
+        // 捕捉历史：无论用户是否落了盘，都先留一份。
+        // 但**必须排除 quiet 路径** —— 那是捕捉失败/权限未生效时的兜底清理，
+        // 早期版本没排除，结果一次失败的捕捉也会往历史里塞一张空白图。
+        // 同样要求真的有底图，否则记下来的只是白板。
+        if !quiet, Prefs.historyEnabled {
+            for st in canvases where st.frozenCG != nil {
+                if let img = st.composeCG(region: nil) { CaptureHistory.record(img) }
+            }
+        }
+
         if Prefs.autoScreenshot {
             for st in canvases { Exporter.autoScreenshot(st) }
         }
@@ -1004,6 +1014,24 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     func pasteFromClipboard() { setBackground(.clipboard) }
 
+    // MARK: 用任意图像开启会话
+
+    /// 用一张现成的图开启标注会话（窗口捕捉、历史回看都走这里）。
+    /// - Parameter rect: 画布在屏幕坐标系里的位置与大小
+    func startSession(withImage image: CGImage, rect: CGRect, completion: (() -> Void)? = nil) {
+        guard !isActive else { return }
+        let screen = NSScreen.screens.first { $0.frame.intersects(rect) } ?? NSScreen.main
+        guard let screen else { return }
+        previousApp = NSWorkspace.shared.frontmostApplication
+        NSApp.activate(ignoringOtherApps: true)
+        isActive = true
+        model.isActive = true
+        startPanel?.orderOut(nil)
+        Prefs.ensureFolders()
+        buildSession(specs: [CanvasSpec(screen: screen, image: image, rect: rect)])
+        completion?()
+    }
+
     // MARK: 窗口捕捉
 
     /// 抓取指定窗口，并直接以它为画布开启会话
@@ -1022,16 +1050,12 @@ final class SessionController: NSObject, NSMenuDelegate {
                            "该窗口可能已关闭或受保护。", "該視窗可能已關閉或受保護。"))
             return
         }
-        previousApp = NSWorkspace.shared.frontmostApplication
-        NSApp.activate(ignoringOtherApps: true)
-        isActive = true
-        model.isActive = true
-        startPanel?.orderOut(nil)
-        Prefs.ensureFolders()
-        buildSession(specs: [CanvasSpec(screen: screen, image: img, rect: info.frame)])
-        flashStatus(LS("Fenster aufgenommen: \(info.title)",
-                       "Window captured: \(info.title)",
-                       "已捕捉窗口：\(info.title)", "已捕捉視窗：\(info.title)"))
+        let title = info.title
+        startSession(withImage: img, rect: info.frame) {
+            SessionController.shared.flashStatus(LS("Fenster aufgenommen: \(title)",
+                                                    "Window captured: \(title)",
+                                                    "已捕捉窗口：\(title)", "已捕捉視窗：\(title)"))
+        }
     }
 
     // MARK: 区域捕捉

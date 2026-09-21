@@ -90,6 +90,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: LS("Screenshot-Ordner öffnen", "Open screenshots folder", "打开截图文件夹", "開啟截圖資料夾"),
                      action: #selector(menuOpenFolder), keyEquivalent: "")
+        menu.addItem(withTitle: LS("Aufnahmeverlauf …", "Capture history …", "捕捉历史 …", "捕捉歷史 …"),
+                     action: #selector(menuHistory), keyEquivalent: "h")
         menu.addItem(withTitle: LS("Info und Einstellungen …", "Info and settings …", "信息与设置 …", "資訊與設定 …"),
                      action: #selector(menuSettings), keyEquivalent: ",")
         menu.addItem(.separator())
@@ -125,6 +127,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let n = sender.representedObject as? NSNumber else { return }
         SessionController.shared.captureWindow(id: CGWindowID(n.uint32Value))
     }
+
+    @objc private func menuHistory() { HistoryWindowController.shared.show() }
 
     @objc private func menuSetDelay(_ sender: NSMenuItem) {
         Prefs.captureDelay = sender.tag

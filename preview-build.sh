@@ -32,6 +32,7 @@ swiftc -sdk "$SDK" -target "$TARGET" -swift-version 5 -O -module-name POFPreview
   "$ROOT"/Sources/Core.swift "$ROOT"/Sources/Prefs.swift "$ROOT"/Sources/Capture.swift \
   "$ROOT"/Sources/CanvasView.swift "$ROOT"/Sources/Windows.swift "$ROOT"/Sources/Toolbar.swift \
   "$ROOT"/Sources/Exporter.swift "$ROOT"/Sources/SettingsWindow.swift "$ROOT"/Sources/HotKey.swift \
+  "$ROOT"/Sources/Decorator.swift "$ROOT"/Sources/History.swift \
   "$ROOT"/Tools/preview/main.swift
 
 # ---- 最小 Info.plist，让 Brand.name 取到真实产品名 -------------------------

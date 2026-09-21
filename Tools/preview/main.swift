@@ -69,6 +69,19 @@ let fit = hosting.fittingSize
 hosting.frame = NSRect(x: 0, y: 0, width: fit.width, height: fit.height)
 renderView(hosting, named: "01-toolbar-\(L.lang.rawValue).png")
 
+// 选择工具下的排列面板（只在选择工具激活时出现）
+do {
+    model.tool = .select
+    model.selectedCount = 3
+    let sel = ToolbarView(model: model, controller: SessionController.shared)
+    let h2 = NSHostingView(rootView: sel)
+    let f2 = h2.fittingSize
+    h2.frame = NSRect(x: 0, y: 0, width: f2.width, height: f2.height)
+    renderView(h2, named: "12-toolbar-select-\(L.lang.rawValue).png")
+    model.tool = .pen
+    model.selectedCount = 0
+}
+
 // ---------------------------------------------------------------- 1b. 设置窗口（文字最密集，用来验证四语）
 do {
     let sm = SettingsModel()
@@ -227,7 +240,7 @@ do {
             let stk = Stroke(shape: .number(i + 1, c, d, .circle), color: Palette.red, width: 6)
             st.layer.apply(stk); st.strokes.append(stk)
         }
-        if let cg = st.composeCG(region: CGRect(x: 40, y: 40, width: 640, height: 240)) {
+        if let cg = st.composeCG(crop: CGRect(x: 40, y: 40, width: 640, height: 240)) {
             let url = outDir.appendingPathComponent("11-number-centering.png")
             try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: url)
             print("wrote \(url.path)  \(cg.width)x\(cg.height)")
@@ -324,7 +337,7 @@ if let st = CanvasState(screen: screen, captured: cap) {
     st.background = .grid
     let s = Stroke(shape: .rect(CGRect(x: 150, y: 150, width: 300, height: 200)), color: Palette.red, width: 6)
     st.layer.apply(s); st.strokes.append(s)
-    if let cg = st.composeCG(region: CGRect(x: 100, y: 100, width: 600, height: 400)) {
+    if let cg = st.composeCG(crop: CGRect(x: 100, y: 100, width: 600, height: 400)) {
         let url = outDir.appendingPathComponent("04-grid-region.png")
         try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: url)
         print("wrote \(url.path)  \(cg.width)x\(cg.height) (选区裁剪)")
@@ -345,7 +358,7 @@ if let st = CanvasState(screen: screen, captured: cap) {
     let er = Stroke(shape: .freehand((0..<60).map { i in
         CGPoint(x: 420 + CGFloat(i) * 2, y: 150 + CGFloat(i) * 4) }), color: .black, width: 40, isEraser: true)
     st.layer.apply(er); st.strokes.append(er)
-    if let cg = st.composeCG(region: CGRect(x: 60, y: 120, width: 800, height: 320)) {
+    if let cg = st.composeCG(crop: CGRect(x: 60, y: 120, width: 800, height: 320)) {
         let url = outDir.appendingPathComponent("05-eraser.png")
         try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: url)
         print("wrote \(url.path) (橡皮擦：斜带应露出白底并切断三条线)")
@@ -364,7 +377,7 @@ if let st = CanvasState(screen: screen, captured: cap) {
     let e = Stroke(shape: .text("rebuild OK", CGPoint(x: 420, y: 300), 34), color: Palette.green, width: 4)
     st.strokes = [a, b, c, d, e]
     st.rebuild()     // 模拟撤销后的重放
-    if let cg = st.composeCG(region: CGRect(x: 60, y: 60, width: 700, height: 420)) {
+    if let cg = st.composeCG(crop: CGRect(x: 60, y: 60, width: 700, height: 420)) {
         let url = outDir.appendingPathComponent("06-rebuild.png")
         try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: url)
         print("wrote \(url.path) (撤销重放)")

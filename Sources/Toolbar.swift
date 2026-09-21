@@ -222,6 +222,10 @@ struct ToolbarView: View {
                 colorGrid
                 Divider().background(Color.black.opacity(0.3))
                 toolGrid
+                if model.isSelecting {
+                    Divider().background(Color.black.opacity(0.3))
+                    arrangeGrid
+                }
                 Divider().background(Color.black.opacity(0.3))
                 actionGrid
             }
@@ -328,6 +332,74 @@ struct ToolbarView: View {
 
     /// 操作区。工具栏是固定两列宽（Prefs.buttonW * 2 + 间距），
     /// 所以**每行必须恰好两个按钮** —— 放三个会被 SwiftUI 压缩变形。
+    /// 排列面板：只在选择工具激活时出现，避免长期占用工具栏高度
+    private var arrangeGrid: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 3) {
+                Menu {
+                    Section(LS("Horizontal", "Horizontal", "水平", "水平")) {
+                        Button(LS("Linksbündig", "Align left", "左对齐", "左對齊")) { controller.alignSelection(.left) }
+                        Button(LS("Zentriert", "Align centre", "水平居中", "水平置中")) { controller.alignSelection(.centerX) }
+                        Button(LS("Rechtsbündig", "Align right", "右对齐", "右對齊")) { controller.alignSelection(.right) }
+                    }
+                    Section(LS("Vertikal", "Vertical", "垂直", "垂直")) {
+                        Button(LS("Oben", "Align top", "顶对齐", "頂對齊")) { controller.alignSelection(.top) }
+                        Button(LS("Mittig", "Align middle", "垂直居中", "垂直置中")) { controller.alignSelection(.centerY) }
+                        Button(LS("Unten", "Align bottom", "底对齐", "底對齊")) { controller.alignSelection(.bottom) }
+                    }
+                    Divider()
+                    Button(LS("Horizontal verteilen", "Distribute horizontally", "水平等距分布", "水平等距分佈")) {
+                        controller.distributeSelection(horizontal: true)
+                    }
+                    Button(LS("Vertikal verteilen", "Distribute vertically", "垂直等距分布", "垂直等距分佈")) {
+                        controller.distributeSelection(horizontal: false)
+                    }
+                } label: { menuTile("align.horizontal.left") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+                .disabled(!model.hasMultiSelection)
+                .help(LS("Ausrichten", "Align", "对齐与分布", "對齊與分佈"))
+
+                Menu {
+                    Button(LS("Gruppieren (⌘G)", "Group (⌘G)", "组合 (⌘G)", "組合 (⌘G)")) {
+                        controller.groupSelection()
+                    }.disabled(!model.hasMultiSelection)
+                    Button(LS("Gruppierung aufheben (⇧⌘G)", "Ungroup (⇧⌘G)", "取消组合 (⇧⌘G)", "取消組合 (⇧⌘G)")) {
+                        controller.ungroupSelection()
+                    }.disabled(!model.hasSelection)
+                    Divider()
+                    Button(LS("In den Vordergrund", "Bring to front", "置于顶层", "置於頂層")) {
+                        controller.reorderSelection(toFront: true)
+                    }
+                    Button(LS("In den Hintergrund", "Send to back", "置于底层", "置於底層")) {
+                        controller.reorderSelection(toFront: false)
+                    }
+                } label: { menuTile("square.on.square") }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+                .disabled(!model.hasSelection)
+                .help(LS("Gruppieren und Ebene", "Group and order", "组合与层级", "組合與層級"))
+            }
+            HStack(spacing: 3) {
+                ActionButton(symbol: "checkmark.circle",
+                             help: LS("Alles auswählen (⌘A)", "Select all (⌘A)", "全选 (⌘A)", "全選 (⌘A)")) {
+                    controller.selectAll()
+                }
+                ActionButton(symbol: "trash",
+                             help: LS("Auswahl löschen (⌫)", "Delete selection (⌫)", "删除选中 (⌫)", "刪除選取 (⌫)"),
+                             enabled: model.hasSelection) { controller.deleteSelection() }
+            }
+        }
+    }
+
+    private func menuTile(_ symbol: String) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 13, weight: .semibold))
+            .frame(width: Prefs.buttonW, height: Prefs.buttonH)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color(NSColor.controlBackgroundColor).opacity(0.55)))
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.28), lineWidth: 1))
+    }
+
     private var actionGrid: some View {
         VStack(spacing: 3) {
             HStack(spacing: 3) {

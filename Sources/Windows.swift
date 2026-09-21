@@ -394,6 +394,10 @@ final class ToolbarModel: ObservableObject {
     @Published var zoomFactor: CGFloat = 1
     @Published var canUndo = false
     @Published var canRedo = false
+    @Published var selectedCount = 0
+    var hasSelection: Bool { selectedCount > 0 }
+    var hasMultiSelection: Bool { selectedCount > 1 }
+    var isSelecting: Bool { tool == .select }
     @Published var hasStrokes = false
     @Published var hasRegion = false
     @Published var screenName = ""
@@ -794,6 +798,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         model.zoomFactor = activeCanvas?.zoom ?? 1
         model.canUndo = !(activeCanvas?.strokes.isEmpty ?? true)
         model.canRedo = !(activeCanvas?.undoneStrokes.isEmpty ?? true)
+        model.selectedCount = activeCanvas?.selection.count ?? 0
         model.hasStrokes = model.canUndo
         model.hasRegion = activeCanvas.map { $0.region != nil || $0.regionPath != nil } ?? false
         model.screenName = activeCanvas?.screen.localizedName ?? ""
@@ -1058,6 +1063,132 @@ final class SessionController: NSObject, NSMenuDelegate {
         }
     }
 
+    // MARK: 选择与排列
+
+    enum AlignMode { case left, centerX, right, top, centerY, bottom }
+
+    private func selectionChanged(_ st: CanvasState) {
+        st.rebuild()
+        st.invalidateZoomCache()
+        views.forEach { $0.needsDisplay = true }
+        syncModel()
+    }
+
+    func selectAll() {
+        guard let st = activeCanvas else { return }
+        st.selection = Set(st.strokes.filter { !$0.isEraser }.map { $0.id })
+        views.forEach { $0.needsDisplay = true }
+        syncModel()
+    }
+
+    func clearSelection() {
+        guard let st = activeCanvas else { return }
+        st.selection.removeAll()
+        views.forEach { $0.needsDisplay = true }
+        syncModel()
+    }
+
+    func deleteSelection() {
+        guard let st = activeCanvas, !st.selection.isEmpty else { return }
+        let n = st.selection.count
+        st.strokes.removeAll { st.selection.contains($0.id) }
+        st.selection.removeAll()
+        st.undoneStrokes.removeAll()
+        selectionChanged(st)
+        flashStatus(LS("\(n) Objekt(e) gelöscht", "\(n) object(s) deleted",
+                       "已删除 \(n) 个对象", "已刪除 \(n) 個物件"))
+    }
+
+    func nudgeSelection(dx: CGFloat, dy: CGFloat) {
+        guard let st = activeCanvas, !st.selection.isEmpty else { return }
+        st.moveSelection(dx: dx, dy: dy)
+        views.forEach { $0.needsDisplay = true }
+    }
+
+    /// 对齐。基准是选区整体的包围盒。
+    func alignSelection(_ mode: AlignMode) {
+        guard let st = activeCanvas, st.selection.count > 1, let box = st.selectionBounds else { return }
+        var deltas: [UUID: CGPoint] = [:]
+        for s in st.selectedStrokes {
+            let b = s.shape.bounds
+            var dx: CGFloat = 0, dy: CGFloat = 0
+            switch mode {
+            case .left:    dx = box.minX - b.minX
+            case .centerX: dx = box.midX - b.midX
+            case .right:   dx = box.maxX - b.maxX
+            case .top:     dy = box.minY - b.minY
+            case .centerY: dy = box.midY - b.midY
+            case .bottom:  dy = box.maxY - b.maxY
+            }
+            if abs(dx) > 0.01 || abs(dy) > 0.01 { deltas[s.id] = CGPoint(x: dx, y: dy) }
+        }
+        guard !deltas.isEmpty else { return }
+        st.strokes = st.strokes.map { s in
+            guard let d = deltas[s.id] else { return s }
+            return s.translated(dx: d.x, dy: d.y)
+        }
+        selectionChanged(st)
+    }
+
+    /// 等距分布。首尾不动，中间的重新排布。
+    func distributeSelection(horizontal: Bool) {
+        guard let st = activeCanvas, st.selection.count > 2 else { return }
+        let sel = st.selectedStrokes.sorted {
+            horizontal ? $0.shape.bounds.midX < $1.shape.bounds.midX
+                       : $0.shape.bounds.midY < $1.shape.bounds.midY
+        }
+        guard let first = sel.first, let last = sel.last else { return }
+        let a = horizontal ? first.shape.bounds.midX : first.shape.bounds.midY
+        let b = horizontal ? last.shape.bounds.midX : last.shape.bounds.midY
+        let step = (b - a) / CGFloat(sel.count - 1)
+        var deltas: [UUID: CGPoint] = [:]
+        for (i, s) in sel.enumerated() where i > 0 && i < sel.count - 1 {
+            let cur = horizontal ? s.shape.bounds.midX : s.shape.bounds.midY
+            let want = a + step * CGFloat(i)
+            deltas[s.id] = horizontal ? CGPoint(x: want - cur, y: 0) : CGPoint(x: 0, y: want - cur)
+        }
+        guard !deltas.isEmpty else { return }
+        st.strokes = st.strokes.map { s in
+            guard let d = deltas[s.id] else { return s }
+            return s.translated(dx: d.x, dy: d.y)
+        }
+        selectionChanged(st)
+    }
+
+    /// 组合：组合内的笔画在选择和移动时视为一体
+    func groupSelection() {
+        guard let st = activeCanvas, st.selection.count > 1 else { return }
+        let g = UUID()
+        st.strokes = st.strokes.map { s in
+            guard st.selection.contains(s.id) else { return s }
+            var c = s; c.groupID = g; return c
+        }
+        selectionChanged(st)
+        flashStatus(LS("\(st.selection.count) Objekte gruppiert", "Grouped \(st.selection.count) objects",
+                       "已组合 \(st.selection.count) 个对象", "已組合 \(st.selection.count) 個物件"))
+    }
+
+    func ungroupSelection() {
+        guard let st = activeCanvas else { return }
+        let groups = Set(st.selectedStrokes.compactMap { $0.groupID })
+        guard !groups.isEmpty else { return }
+        st.strokes = st.strokes.map { s in
+            guard let g = s.groupID, groups.contains(g) else { return s }
+            var c = s; c.groupID = nil; return c
+        }
+        selectionChanged(st)
+        flashStatus(LS("Gruppierung aufgehoben", "Ungrouped", "已取消组合", "已取消組合"))
+    }
+
+    /// 层级：把选中对象移到最前 / 最后
+    func reorderSelection(toFront: Bool) {
+        guard let st = activeCanvas, !st.selection.isEmpty else { return }
+        let sel = st.strokes.filter { st.selection.contains($0.id) }
+        let rest = st.strokes.filter { !st.selection.contains($0.id) }
+        st.strokes = toFront ? rest + sel : sel + rest
+        selectionChanged(st)
+    }
+
     // MARK: 旋转画布
 
     /// 把整块画布旋转 90°：底图和所有笔画一起转，转完还能继续标注和撤销。
@@ -1147,6 +1278,14 @@ final class SessionController: NSObject, NSMenuDelegate {
         case "z":
             if event.modifierFlags.contains(.shift) { redo() } else { undo() }
             return true
+        case "a" where event.modifierFlags.contains(.command):
+            selectAll(); return true
+        case "g" where event.modifierFlags.contains(.command):
+            if event.modifierFlags.contains(.shift) { ungroupSelection() } else { groupSelection() }
+            return true
+        case "\u{7F}", "\u{8}":      // Delete / Backspace
+            guard activeCanvas?.selection.isEmpty == false else { return false }
+            deleteSelection(); return true
         case "c": Exporter.copyToClipboard(activeCanvas); return true
         case "v": pasteFromClipboard(); return true
         case "s", "u": Exporter.saveWithPanel(activeCanvas, screen: activeCanvas?.screen); return true
@@ -1187,7 +1326,15 @@ final class SessionController: NSObject, NSMenuDelegate {
             }
             if let st = activeCanvas, st.isZoomed { views.forEach { $0.enterZoom(1, center: nil) }; applyTool(previousTool, silent: false); return true }
             finish(); return true
-        case 123, 124, 125, 126: // 方向键移动选区
+        case 123, 124, 125, 126: // 方向键
+            // 选择工具下：微调选中对象（⇧ 加速 10 倍）
+            if tool == .select, activeCanvas?.selection.isEmpty == false {
+                let step: CGFloat = shift ? 10 : 1
+                let dx: CGFloat = event.keyCode == 123 ? -step : (event.keyCode == 124 ? step : 0)
+                let dy: CGFloat = event.keyCode == 125 ? step : (event.keyCode == 126 ? -step : 0)
+                nudgeSelection(dx: dx, dy: dy)
+                return true
+            }
             guard tool == .region, activeCanvas.map({ $0.region != nil || $0.regionPath != nil }) == true else { return false }
             let step: CGFloat = shift ? 10 : 1
             let dx: CGFloat = event.keyCode == 123 ? -step : (event.keyCode == 124 ? step : 0)
@@ -1212,6 +1359,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         case "k": setTool(.cross); return true
         case "f": setTool(.region); return true
         case "m": setTool(.magnifier); return true
+        case "v": setTool(.select); return true
         case "n": setTool(.number); return true
         case "s": setTool(.spotlight); return true
         case "u": setTool(.blur); return true

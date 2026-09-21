@@ -78,6 +78,7 @@ enum ToolKind: String, CaseIterable {
     case blur, pixelate    // 打码：模糊 / 像素化
     case eyedropper        // 屏幕取色
     case ruler             // 屏幕标尺
+    case select            // 选择 / 移动 / 对齐
     case region, magnifier
     case zoomIn, zoomOut
 
@@ -101,6 +102,7 @@ enum ToolKind: String, CaseIterable {
         case .pixelate: return "squareshape.split.3x3"
         case .eyedropper: return "eyedropper"
         case .ruler: return "ruler"
+        case .select: return "cursorarrow"
         case .region: return "rectangle.dashed"
         case .magnifier: return "magnifyingglass"
         case .zoomIn: return "plus.magnifyingglass"
@@ -128,6 +130,7 @@ enum ToolKind: String, CaseIterable {
         case .pixelate: return LS("Verpixeln", "Pixelate", "马赛克打码", "馬賽克打碼")
         case .eyedropper: return LS("Farbpipette", "Colour picker", "颜色吸管", "顏色吸管")
         case .ruler: return LS("Lineal", "Ruler", "屏幕标尺", "螢幕標尺")
+        case .select: return LS("Auswählen", "Select", "选择与移动", "選取與移動")
         case .region: return LS("Bildbereich wählen", "Select region", "选区", "選取範圍")
         case .magnifier: return LS("Lupe", "Magnifier", "放大镜", "放大鏡")
         case .zoomIn: return LS("Hineinzoomen", "Zoom in", "放大视图", "放大檢視")
@@ -156,6 +159,7 @@ enum ToolKind: String, CaseIterable {
         case .pixelate: return "I"
         case .eyedropper: return "C"
         case .ruler: return "L"
+        case .select: return "V"
         case .region: return "F"
         case .magnifier: return "M"
         case .zoomIn: return "+"
@@ -355,16 +359,64 @@ extension Shape {
     }
 }
 
-extension Stroke {
-    /// 整体平移（裁剪画布时用）
-    func translated(dx: CGFloat, dy: CGFloat) -> Stroke {
-        var copy = self
-        copy.shape = shape.translated(dx: dx, dy: dy)
-        return copy
-    }
-}
-
 extension Shape {
+    /// 包围盒（画布局部坐标）。选择框、对齐、分布都基于它。
+    var bounds: CGRect {
+        switch self {
+        case .freehand(let pts):
+            guard let f = pts.first else { return .zero }
+            var r = CGRect(origin: f, size: .zero)
+            for p in pts.dropFirst() { r = r.union(CGRect(origin: p, size: .zero)) }
+            return r
+        case .line(let a, let b), .arrow(let a, let b), .doubleArrow(let a, let b),
+             .ruler(let a, let b, _):
+            return CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+                          width: abs(b.x - a.x), height: abs(b.y - a.y))
+        case .rect(let r), .rectFilled(let r), .ellipse(let r), .ellipseFilled(let r),
+             .spotlight(let r), .redact(let r, _):
+            return r
+        case .text(let t, let o, let sz):
+            return CGRect(origin: o, size: ShapeRenderer.textSize(t, fontSize: sz))
+        case .check(let c, let sz), .cross(let c, let sz):
+            let s = max(14, sz)
+            return CGRect(x: c.x - s / 2, y: c.y - s / 2, width: s, height: s)
+        case .number(_, let c, let d, _):
+            let s = max(18, d)
+            return CGRect(x: c.x - s / 2, y: c.y - s / 2, width: s, height: s)
+        }
+    }
+
+    /// 命中测试。点击选中时用，比单纯的包围盒判断精确 ——
+    /// 否则一条长斜线的整个包围矩形都会响应点击。
+    func hitTest(_ p: CGPoint, tolerance: CGFloat) -> Bool {
+        func segDist(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
+            let dx = b.x - a.x, dy = b.y - a.y
+            let len2 = dx * dx + dy * dy
+            if len2 < 0.0001 { return hypot(p.x - a.x, p.y - a.y) }
+            var t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+            t = Swift.max(0, Swift.min(1, t))
+            return hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+        }
+        switch self {
+        case .freehand(let pts):
+            guard pts.count > 1 else { return pts.first.map { hypot(p.x - $0.x, p.y - $0.y) <= tolerance } ?? false }
+            for i in 0..<(pts.count - 1) where segDist(pts[i], pts[i + 1]) <= tolerance { return true }
+            return false
+        case .line(let a, let b), .arrow(let a, let b), .doubleArrow(let a, let b),
+             .ruler(let a, let b, _):
+            return segDist(a, b) <= tolerance
+        case .rect(let r), .ellipse(let r):
+            // 只描边不填充：靠近边线才算命中
+            let outer = r.insetBy(dx: -tolerance, dy: -tolerance)
+            let inner = r.insetBy(dx: tolerance, dy: tolerance)
+            return outer.contains(p) && !(inner.width > 0 && inner.height > 0 && inner.contains(p))
+        case .rectFilled(let r), .ellipseFilled(let r), .spotlight(let r), .redact(let r, _):
+            return r.insetBy(dx: -tolerance, dy: -tolerance).contains(p)
+        case .text, .check, .cross, .number:
+            return bounds.insetBy(dx: -tolerance, dy: -tolerance).contains(p)
+        }
+    }
+
     /// 随画布一起旋转（quarterTurns：1=顺时针 90°，2=180°，3=逆时针 90°）。
     /// 必须和底图用**同一套坐标变换**，否则标注会和图像错位。
     func rotated(canvasSize: CGSize, quarterTurns: Int) -> Shape {
@@ -418,10 +470,21 @@ enum RedactStyle: String {
 }
 
 struct Stroke {
+    /// 身份标识。选择、组合、对齐都靠它引用具体笔画。
+    var id = UUID()
+    /// 所属组合。同组笔画在选择与移动时视为一体。
+    var groupID: UUID? = nil
     var shape: Shape
     var color: NSColor
     var width: CGFloat
     var isEraser: Bool = false
+
+    /// 平移（保留身份与组合关系）
+    func translated(dx: CGFloat, dy: CGFloat) -> Stroke {
+        var c = self
+        c.shape = shape.translated(dx: dx, dy: dy)
+        return c
+    }
 }
 
 enum BackgroundKind: String, CaseIterable {

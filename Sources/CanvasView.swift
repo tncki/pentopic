@@ -20,6 +20,41 @@ final class CanvasState {
     var region: CGRect?
     /// 自由手绘选区（多边形，画布局部坐标）。非空时优先于 region。
     var regionPath: [CGPoint]?
+
+    /// 选中的笔画 id（选择工具的产物）
+    var selection: Set<UUID> = []
+
+    var selectedStrokes: [Stroke] { strokes.filter { selection.contains($0.id) } }
+
+    /// 选区总包围盒
+    var selectionBounds: CGRect? {
+        let sel = selectedStrokes
+        guard let f = sel.first else { return nil }
+        var r = f.shape.bounds
+        for s in sel.dropFirst() { r = r.union(s.shape.bounds) }
+        return r
+    }
+
+    /// 命中测试：返回最上面（最后画的）命中的笔画
+    func stroke(at p: CGPoint, tolerance: CGFloat = 7) -> Stroke? {
+        for s in strokes.reversed() where !s.isEraser {
+            if s.shape.hitTest(p, tolerance: tolerance + s.width / 2) { return s }
+        }
+        return nil
+    }
+
+    /// 把一条笔画展开成"整组"。组合内的笔画在选择和移动时视为一体。
+    func expandGroup(of stroke: Stroke) -> Set<UUID> {
+        guard let g = stroke.groupID else { return [stroke.id] }
+        return Set(strokes.filter { $0.groupID == g }.map { $0.id })
+    }
+
+    /// 平移选中的笔画
+    func moveSelection(dx: CGFloat, dy: CGFloat) {
+        guard !selection.isEmpty, dx != 0 || dy != 0 else { return }
+        strokes = strokes.map { selection.contains($0.id) ? $0.translated(dx: dx, dy: dy) : $0 }
+        rebuild()
+    }
     var background: BackgroundKind = .currentScreen
     var clipboardCG: CGImage?
     var clipboardSize: CGSize = .zero
@@ -386,6 +421,9 @@ final class CanvasView: NSView {
     let state: CanvasState
     weak var controller: SessionController?
 
+    private var marquee: CGRect?            // 框选矩形
+    private var marqueeStart: CGPoint?
+    private var selectDragLast: CGPoint?
     private var live: Stroke?
     private var livePoints: [CGPoint] = []
     private var dragStart: CGPoint = .zero
@@ -457,6 +495,8 @@ final class CanvasView: NSView {
                 return CursorFactory.magnifier()
             case .eyedropper:
                 return CursorFactory.eyedropper()
+            case .select:
+                return .arrow
             default:
                 return CursorFactory.crosshair()
             }
@@ -489,6 +529,7 @@ final class CanvasView: NSView {
                 CanvasRenderer.drawFullImage(ctx, layerImg, size: state.pointSize)
             }
             if let live = live, !live.isEraser { ShapeRenderer.draw(live, in: ctx) }
+            drawSelection(ctx)
             drawRegion(ctx)
             drawHUD()
         }
@@ -523,6 +564,51 @@ final class CanvasView: NSView {
             ctx.restoreGState()
         }
         drawHUD()
+    }
+
+    /// 选中笔画的虚线框 + 整体包围盒
+    private func drawSelection(_ ctx: CGContext) {
+        let sel = state.selectedStrokes
+        guard !sel.isEmpty else { return }
+        ctx.saveGState()
+        ctx.setLineWidth(1)
+        for s in sel {
+            let r = s.shape.bounds.insetBy(dx: -3, dy: -3)
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
+            ctx.stroke(r)
+            ctx.setLineDash(phase: 0, lengths: [4, 3])
+            ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+            ctx.stroke(r)
+            ctx.setLineDash(phase: 0, lengths: [])
+        }
+        // 多选时再画一个整体框
+        if sel.count > 1, let all = state.selectionBounds {
+            let r = all.insetBy(dx: -6, dy: -6)
+            ctx.setLineWidth(1.5)
+            ctx.setLineDash(phase: 0, lengths: [7, 5])
+            ctx.setStrokeColor(NSColor.controlAccentColor.withAlphaComponent(0.95).cgColor)
+            ctx.stroke(r)
+            ctx.setLineDash(phase: 0, lengths: [])
+            // 角点提示可以拖动
+            for c in [CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
+                      CGPoint(x: r.minX, y: r.maxY), CGPoint(x: r.maxX, y: r.maxY)] {
+                ctx.setFillColor(NSColor.white.cgColor)
+                ctx.fillEllipse(in: CGRect(x: c.x - 3.5, y: c.y - 3.5, width: 7, height: 7))
+                ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+                ctx.strokeEllipse(in: CGRect(x: c.x - 3.5, y: c.y - 3.5, width: 7, height: 7))
+            }
+        }
+        ctx.restoreGState()
+        if let m = marquee {
+            ctx.saveGState()
+            ctx.setLineWidth(1)
+            NSColor.white.setStroke(); ctx.stroke(m)
+            ctx.setLineDash(phase: 0, lengths: [5, 4])
+            NSColor.controlAccentColor.setStroke(); ctx.stroke(m)
+            ctx.setFillColor(NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor)
+            ctx.fill(m)
+            ctx.restoreGState()
+        }
     }
 
     private func drawRegion(_ ctx: CGContext) {
@@ -725,6 +811,25 @@ final class CanvasView: NSView {
         case .number:
             commit(Stroke(shape: .number(state.nextNumber, p, w * 2.4 + 14, Prefs.numberShape),
                           color: strokeColor, width: w))
+        case .select:
+            let shift = event.modifierFlags.contains(.shift)
+            if let hit = state.stroke(at: p) {
+                let ids = state.expandGroup(of: hit)
+                if shift {
+                    if state.selection.isSuperset(of: ids) { state.selection.subtract(ids) }
+                    else { state.selection.formUnion(ids) }
+                } else if !state.selection.contains(hit.id) {
+                    state.selection = ids
+                }
+                // 点在已选中的笔画上 → 开始整体拖动
+                if state.selection.contains(hit.id) { selectDragLast = p }
+            } else {
+                if !shift { state.selection.removeAll() }
+                marqueeStart = p
+                marquee = CGRect(origin: p, size: .zero)
+            }
+            isDragging = true
+            needsDisplay = true
         case .text:
             beginTextEditing(at: p, color: strokeColor, width: w)
         case .check:
@@ -826,6 +931,15 @@ final class CanvasView: NSView {
             live = Stroke(shape: .spotlight(makeRect(dragStart, p, constrain: shift)),
                           color: c.currentColor, width: c.penSize)
             needsDisplay = true
+        case .select:
+            if let last = selectDragLast {
+                state.moveSelection(dx: p.x - last.x, dy: p.y - last.y)
+                selectDragLast = p
+            } else if let start = marqueeStart {
+                marquee = makeRect(start, p, constrain: false)
+            }
+            needsDisplay = true
+            return
         case .ruler:
             let end = constrained(dragStart, p, square: false, snap45: shift)
             let px = hypot(end.x - dragStart.x, end.y - dragStart.y) * state.scale
@@ -888,6 +1002,17 @@ final class CanvasView: NSView {
             }
         case .line, .arrow, .doubleArrow, .rect, .rectFilled, .ellipse, .ellipseFilled:
             if let s = live { commit(s) }
+        case .select:
+            let shift = event.modifierFlags.contains(.shift)
+            if let m = marquee {
+                let hits = state.strokes.filter { !$0.isEraser && $0.shape.bounds.intersects(m) }
+                var ids = Set<UUID>()
+                for h in hits { ids.formUnion(state.expandGroup(of: h)) }
+                if shift { state.selection.formUnion(ids) } else { state.selection = ids }
+            }
+            marquee = nil; marqueeStart = nil; selectDragLast = nil
+            c.syncModel()
+            needsDisplay = true
         case .spotlight, .blur, .pixelate, .ruler:
             // 拖得太小就当作误触，不留下一条没有意义的笔画
             if let s = live, case .spotlight(let r) = s.shape, r.width > 6, r.height > 6 {

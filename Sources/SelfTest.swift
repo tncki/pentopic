@@ -393,8 +393,32 @@ enum SelfTest {
             return (colors.count, diffs.isEmpty ? 0 : diffs.reduce(0, +) / Double(diffs.count))
         }
 
+        // 用确定性的高对比度棋盘作为底图。
+        // 早先直接用真实冻结屏幕，结果这一项会随"桌面上恰好有什么"而波动 ——
+        // 实测同一台机器上细节值在 0.93 和 4.21 之间跳，阈值就变得不可靠。
+        func makeChecker(_ w: Int, _ h: Int, cell: Int = 6) -> CGImage? {
+            let cs = CGColorSpace(name: CGColorSpace.sRGB)!
+            guard let c = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+                                    bytesPerRow: 0, space: cs,
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            c.setFillColor(NSColor.white.cgColor)
+            c.fill(CGRect(x: 0, y: 0, width: w, height: h))
+            c.setFillColor(NSColor.black.cgColor)
+            for y in stride(from: 0, to: h, by: cell) {
+                for x in stride(from: 0, to: w, by: cell) where ((x / cell) + (y / cell)) % 2 == 0 {
+                    c.fill(CGRect(x: x, y: y, width: cell, height: cell))
+                }
+            }
+            return c.makeImage()
+        }
+        let pw = Int(st.pointSize.width * st.scale), ph = Int(st.pointSize.height * st.scale)
+        st.clipboardCG = makeChecker(pw, ph)
+        st.clipboardSize = st.pointSize
+        st.background = .clipboard
+        st.rebuild(); pump(0.2)
+
         let redactRect = CGRect(x: 120, y: 150, width: 380, height: 220)
-        if let frozen = st.frozenCG, let before = st.composeCG() {
+        if let frozen = st.clipboardCG, let before = st.composeCG() {
             let base = regionStats(frozen, redactRect, st.scale)
             log("  底图该区域: \(base.colors) 种颜色, 相邻像素平均差 \(String(format: "%.2f", base.fine))")
 
@@ -811,6 +835,110 @@ enum SelfTest {
         Prefs.freeRegion = savedFree
         Prefs.fixedRegion = savedFixed
         sc.setTool(.pen); pump(0.1)
+
+        // ---- 4j. 选择 / 移动 / 对齐 / 分布 / 组合 ----
+        log("")
+        log("[4j] 选择与排列")
+        sc.clearAll(); pump(0.2)
+        sc.setTool(.rectFilled); sc.setPenSize(1); sc.setSwatch(1)
+        // 三个尺寸不同的方块，方便验证对齐与分布
+        drag([CGPoint(x: 200, y: 200), CGPoint(x: 300, y: 300)]); pump(0.12)
+        drag([CGPoint(x: 500, y: 260), CGPoint(x: 560, y: 340)]); pump(0.12)
+        drag([CGPoint(x: 800, y: 420), CGPoint(x: 900, y: 520)]); pump(0.12)
+        check("已画三个对象", st.strokes.count == 3, "\(st.strokes.count) 个")
+
+        sc.setTool(.select); pump(0.12)
+        check("切换到选择工具", sc.tool == .select)
+
+        // 命中测试：内部命中、远处不命中
+        click(CGPoint(x: 250, y: 250)); pump(0.15)
+        check("点击方块内部可选中", st.selection.count == 1, "\(st.selection.count) 个")
+        let firstSel = st.selectedStrokes.first?.shape.bounds
+        check("选中的是第一个方块",
+              abs((firstSel?.minX ?? 0) - 200) < 2 && abs((firstSel?.minY ?? 0) - 200) < 2,
+              firstSel.map { "(\(Int($0.minX)),\(Int($0.minY)))" } ?? "无")
+
+        click(CGPoint(x: 1200, y: 800)); pump(0.15)
+        check("点击空白处清空选择", st.selection.isEmpty, "\(st.selection.count) 个")
+
+        // 框选：应选中两个
+        drag([CGPoint(x: 150, y: 150), CGPoint(x: 620, y: 400)]); pump(0.2)
+        check("框选命中两个对象", st.selection.count == 2, "\(st.selection.count) 个")
+
+        // 移动：整体平移，包围盒应跟着走
+        guard let boxBefore = st.selectionBounds else { return }
+        if let down = event(.leftMouseDown, CGPoint(x: 250, y: 250)),
+           let mv = event(.leftMouseDragged, CGPoint(x: 280, y: 260)),
+           let up = event(.leftMouseUp, CGPoint(x: 280, y: 260)) {
+            view.mouseDown(with: down); view.mouseDragged(with: mv); view.mouseUp(with: up)
+        }
+        pump(0.2)
+        if let boxAfter = st.selectionBounds {
+            check("拖动整体平移选中对象",
+                  abs((boxAfter.minX - boxBefore.minX) - 30) < 2 &&
+                  abs((boxAfter.minY - boxBefore.minY) - 10) < 2,
+                  String(format: "位移 (%.0f, %.0f)", boxAfter.minX - boxBefore.minX, boxAfter.minY - boxBefore.minY))
+        } else {
+            check("移动后仍有选择", false)
+        }
+        check("移动不改变对象数量", st.strokes.count == 3, "\(st.strokes.count) 个")
+
+        // 对齐：左对齐后两个对象的 minX 应一致
+        sc.alignSelection(.left); pump(0.2)
+        let lefts = st.selectedStrokes.map { $0.shape.bounds.minX }
+        check("左对齐：所有选中对象 minX 一致",
+              lefts.count == 2 && abs(lefts[0] - lefts[1]) < 1.5,
+              lefts.map { String(format: "%.1f", $0) }.joined(separator: ", "))
+
+        // 分布：三个对象水平等距
+        sc.selectAll(); pump(0.15)
+        check("全选到三个对象", st.selection.count == 3)
+        sc.distributeSelection(horizontal: true); pump(0.2)
+        let mids = st.selectedStrokes.map { $0.shape.bounds.midX }.sorted()
+        if mids.count == 3 {
+            let g1 = mids[1] - mids[0], g2 = mids[2] - mids[1]
+            check("水平分布：间距相等", abs(g1 - g2) < 1.5,
+                  String(format: "%.1f vs %.1f", g1, g2))
+        } else {
+            check("分布需要三个对象", false)
+        }
+
+        // 组合：点击组内任一对象应选中整组
+        sc.groupSelection(); pump(0.2)
+        let groups = Set(st.strokes.compactMap { $0.groupID })
+        check("组合后三个对象共享同一 groupID", groups.count == 1 && st.strokes.allSatisfy { $0.groupID != nil },
+              "\(groups.count) 个组")
+        sc.clearSelection(); pump(0.1)
+        click(CGPoint(x: st.strokes[1].shape.bounds.midX, y: st.strokes[1].shape.bounds.midY)); pump(0.15)
+        check("点击组合内任一对象选中整组", st.selection.count == 3, "\(st.selection.count) 个")
+
+        // 移动整组
+        guard let gBefore = st.selectionBounds else { return }
+        sc.nudgeSelection(dx: 40, dy: 0); pump(0.15)
+        if let gAfter = st.selectionBounds {
+            check("整组一起移动", abs((gAfter.minX - gBefore.minX) - 40) < 1.5,
+                  String(format: "位移 %.1f", gAfter.minX - gBefore.minX))
+        }
+        sc.ungroupSelection(); pump(0.15)
+        check("取消组合后 groupID 被清空", st.strokes.allSatisfy { $0.groupID == nil })
+
+        // 层级。「全选后置于顶层」是空操作，所以要只选一个才有意义。
+        let firstIDBefore = st.strokes.first?.id
+        st.selection = firstIDBefore.map { [$0] } ?? []
+        pump(0.1)
+        sc.reorderSelection(toFront: true); pump(0.15)
+        check("单个对象置于顶层后移到末尾", st.strokes.last?.id == firstIDBefore,
+              "原首项现在在\(st.strokes.last?.id == firstIDBefore ? "末" : "非末")位")
+        sc.selectAll(); pump(0.1)
+
+        // 删除
+        let beforeDelete = st.strokes.count
+        sc.deleteSelection(); pump(0.2)
+        check("删除选中对象", st.strokes.isEmpty && beforeDelete == 3,
+              "\(beforeDelete) → \(st.strokes.count)")
+        check("删除后选择被清空", st.selection.isEmpty)
+
+        sc.setTool(.pen); pump(0.1); sc.setSwatch(0)
 
         // ---- 5. 撤销 ----
         log("")

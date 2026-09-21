@@ -364,6 +364,47 @@ extension Stroke {
     }
 }
 
+extension Shape {
+    /// 随画布一起旋转（quarterTurns：1=顺时针 90°，2=180°，3=逆时针 90°）。
+    /// 必须和底图用**同一套坐标变换**，否则标注会和图像错位。
+    func rotated(canvasSize: CGSize, quarterTurns: Int) -> Shape {
+        let q = ((quarterTurns % 4) + 4) % 4
+        guard q != 0 else { return self }
+        let W = canvasSize.width, H = canvasSize.height
+        // 与 CanvasRenderer.rotate90 保持一致：以画布中心为轴、顺时针为正
+        func m(_ p: CGPoint) -> CGPoint {
+            switch q {
+            case 1:  return CGPoint(x: H - p.y, y: p.x)
+            case 2:  return CGPoint(x: W - p.x, y: H - p.y)
+            default: return CGPoint(x: p.y, y: W - p.x)
+            }
+        }
+        func box(_ r: CGRect) -> CGRect {
+            let a = m(CGPoint(x: r.minX, y: r.minY))
+            let b = m(CGPoint(x: r.maxX, y: r.maxY))
+            return CGRect(x: Swift.min(a.x, b.x), y: Swift.min(a.y, b.y),
+                          width: abs(b.x - a.x), height: abs(b.y - a.y))
+        }
+        switch self {
+        case .freehand(let pts):    return .freehand(pts.map(m))
+        case .line(let a, let b):   return .line(m(a), m(b))
+        case .arrow(let a, let b):  return .arrow(m(a), m(b))
+        case .doubleArrow(let a, let b): return .doubleArrow(m(a), m(b))
+        case .rect(let r):          return .rect(box(r))
+        case .rectFilled(let r):    return .rectFilled(box(r))
+        case .ellipse(let r):       return .ellipse(box(r))
+        case .ellipseFilled(let r): return .ellipseFilled(box(r))
+        case .text(let t, let o, let sz): return .text(t, m(o), sz)
+        case .check(let c, let sz):       return .check(m(c), sz)
+        case .cross(let c, let sz):       return .cross(m(c), sz)
+        case .number(let n, let c, let d, let ns): return .number(n, m(c), d, ns)
+        case .spotlight(let r):     return .spotlight(box(r))
+        case .redact(let r, let st): return .redact(box(r), st)
+        case .ruler(let a, let b, let px): return .ruler(m(a), m(b), px)
+        }
+    }
+}
+
 /// 打码方式
 enum RedactStyle: String {
     case blur, pixelate

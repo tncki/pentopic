@@ -325,7 +325,7 @@ enum SelfTest {
 
         var markerPt = CGPoint.zero
         var erasedPt = CGPoint.zero
-        if let composed = st.composeCG(region: nil), let frozen = st.frozenCG {
+        if let composed = st.composeCG(), let frozen = st.frozenCG {
             markerPt = CGPoint(x: 300, y: 480)          // 只被马克盖住
             erasedPt = CGPoint(x: 450, y: 480)          // 随后会被橡皮擦掉
             let a = PixelSampler.color(of: composed, at: CGPoint(x: markerPt.x * st.scale, y: markerPt.y * st.scale))
@@ -341,7 +341,7 @@ enum SelfTest {
         check("橡皮擦新增笔画记录", st.strokes.count == markerOnly + 1, "\(markerOnly) → \(st.strokes.count)")
         check("橡皮擦标记正确", st.strokes.last?.isEraser == true)
 
-        if let composed = st.composeCG(region: nil), let frozen = st.frozenCG {
+        if let composed = st.composeCG(), let frozen = st.frozenCG {
             let a = PixelSampler.color(of: composed, at: CGPoint(x: erasedPt.x * st.scale, y: erasedPt.y * st.scale))
             let b = PixelSampler.color(of: frozen, at: CGPoint(x: erasedPt.x * st.scale, y: erasedPt.y * st.scale))
             check("橡皮擦处还原为原始画面", a?.hexString == b?.hexString,
@@ -394,7 +394,7 @@ enum SelfTest {
         }
 
         let redactRect = CGRect(x: 120, y: 150, width: 380, height: 220)
-        if let frozen = st.frozenCG, let before = st.composeCG(region: nil) {
+        if let frozen = st.frozenCG, let before = st.composeCG() {
             let base = regionStats(frozen, redactRect, st.scale)
             log("  底图该区域: \(base.colors) 种颜色, 相邻像素平均差 \(String(format: "%.2f", base.fine))")
 
@@ -405,7 +405,7 @@ enum SelfTest {
             pump(0.2)
             check("马赛克笔画已提交", st.strokes.last.map { if case .redact(_, .pixelate) = $0.shape { return true }; return false } ?? false)
 
-            if let after = st.composeCG(region: nil) {
+            if let after = st.composeCG() {
                 let px = regionStats(after, redactRect, st.scale)
                 log("  马赛克后:   \(px.colors) 种颜色, 相邻像素平均差 \(String(format: "%.2f", px.fine))")
                 check("马赛克抹平了高频细节（内容被抹掉）", px.fine < base.fine * 0.5,
@@ -421,7 +421,7 @@ enum SelfTest {
             drag([CGPoint(x: redactRect.minX, y: redactRect.minY),
                   CGPoint(x: redactRect.maxX, y: redactRect.maxY)])
             pump(0.2)
-            if let after = st.composeCG(region: nil) {
+            if let after = st.composeCG() {
                 let bl = regionStats(after, redactRect, st.scale)
                 log("  模糊后:     \(bl.colors) 种颜色, 相邻像素平均差 \(String(format: "%.2f", bl.fine))")
                 check("模糊柔化了画面", bl.fine < base.fine,
@@ -473,13 +473,13 @@ enum SelfTest {
         log("[4d] 聚焦高亮")
         sc.clearAll(); pump(0.1)
         let focus = CGRect(x: 300, y: 300, width: 400, height: 260)
-        if let bg = st.composeCG(region: nil) {
+        if let bg = st.composeCG() {
             let inside = PixelSampler.color(of: bg, at: CGPoint(x: focus.midX * st.scale, y: focus.midY * st.scale))
             let outsideBefore = PixelSampler.color(of: bg, at: CGPoint(x: 80 * st.scale, y: 80 * st.scale))
             sc.setTool(.spotlight)
             drag([CGPoint(x: focus.minX, y: focus.minY), CGPoint(x: focus.maxX, y: focus.maxY)])
             pump(0.2)
-            if let after = st.composeCG(region: nil) {
+            if let after = st.composeCG() {
                 let inAfter = PixelSampler.color(of: after, at: CGPoint(x: focus.midX * st.scale, y: focus.midY * st.scale))
                 let outAfter = PixelSampler.color(of: after, at: CGPoint(x: 80 * st.scale, y: 80 * st.scale))
                 check("聚焦区内部保持原样", inAfter?.hexString == inside?.hexString,
@@ -501,7 +501,7 @@ enum SelfTest {
         sc.setTool(.number)
         let numCenter = CGPoint(x: 600, y: 400)
         click(numCenter); pump(0.25)
-        if let img = st.composeCG(region: nil) {
+        if let img = st.composeCG() {
             let scale = st.scale
             let half: CGFloat = 90
             let px = CGRect(x: (numCenter.x - half) * scale, y: (numCenter.y - half) * scale,
@@ -569,7 +569,7 @@ enum SelfTest {
         sc.clearAll(); sc.setBackground(.currentScreen); pump(0.25)
         let spotProbe = CGPoint(x: 1300, y: 850)      // 两次聚焦区之外
         func probeColor() -> String? {
-            guard let cg = st.composeCG(region: nil) else { return nil }
+            guard let cg = st.composeCG() else { return nil }
             return PixelSampler.color(of: cg, at: CGPoint(x: spotProbe.x * st.scale, y: spotProbe.y * st.scale))?.hexString
         }
         let original = probeColor()
@@ -639,7 +639,7 @@ enum SelfTest {
             (.triangle, CGPoint(x: 1100, y: 300))
         ]
         func fillRatio(_ center: CGPoint) -> Double? {
-            guard let img = st.composeCG(region: nil) else { return nil }
+            guard let img = st.composeCG() else { return nil }
             let half: CGFloat = 70
             let px = CGRect(x: (center.x - half) * st.scale, y: (center.y - half) * st.scale,
                             width: half * 2 * st.scale, height: half * 2 * st.scale).integral
@@ -705,6 +705,113 @@ enum SelfTest {
         sc.clearAll(); sc.setBackground(.currentScreen); pump(0.25)
         sc.setPenSize(1); sc.setSwatch(0); sc.setTool(.pen)
 
+        // ---- 4i. 水印 / 装饰边框 / 选区尺寸 ----
+        log("")
+        log("[4i] 水印、装饰边框与选区")
+
+        if let base = st.composeCG() {
+            // 水印：右下角应出现内容，其余区域基本不变
+            Prefs.frameStyle = FrameStyle.none.rawValue
+            Prefs.watermark = ""
+            let plain = Decorator.apply(base)
+            check("无装饰时原样返回（不重绘）", plain.width == base.width && plain.height == base.height,
+                  "\(plain.width)×\(plain.height)")
+
+            Prefs.watermark = "PentoPic 测试水印"
+            let marked = Decorator.apply(base)
+            check("加水印后尺寸不变", marked.width == base.width && marked.height == base.height)
+            // 注意：NSColor.whiteComponent / brightnessComponent 对不兼容的色彩空间
+            // 会**抛异常**（不是返回默认值），必须先 usingColorSpace(.sRGB)。
+            func regionHasInk(_ img: CGImage, _ r: CGRect) -> Bool {
+                var y = Int(r.minY)
+                while y < Int(r.maxY) {
+                    var x = Int(r.minX)
+                    while x < Int(r.maxX) {
+                        if let c = PixelSampler.color(of: img, at: CGPoint(x: x, y: y))?
+                                       .usingColorSpace(.sRGB),
+                           c.alphaComponent > 0.6,
+                           c.redComponent > 0.9, c.greenComponent > 0.9, c.blueComponent > 0.9 {
+                            return true
+                        }
+                        x += 3
+                    }
+                    y += 3
+                }
+                return false
+            }
+            let corner = CGRect(x: CGFloat(base.width) * 0.6, y: CGFloat(base.height) * 0.88,
+                                width: CGFloat(base.width) * 0.39, height: CGFloat(base.height) * 0.11)
+            check("水印出现在右下角", regionHasInk(marked, corner))
+            // 差分检查：左上角本来就可能本来就是白的（真实屏幕截图），
+            // 所以要比"加了水印之后有没有变化"，而不是"这里是不是白的"
+            func regionDiffers(_ a: CGImage, _ b: CGImage, _ r: CGRect) -> Bool {
+                var y = Int(r.minY)
+                while y < Int(r.maxY) {
+                    var x = Int(r.minX)
+                    while x < Int(r.maxX) {
+                        let ca = PixelSampler.color(of: a, at: CGPoint(x: x, y: y))?.usingColorSpace(.sRGB)
+                        let cb = PixelSampler.color(of: b, at: CGPoint(x: x, y: y))?.usingColorSpace(.sRGB)
+                        if ca?.hexString != cb?.hexString { return true }
+                        x += 3
+                    }
+                    y += 3
+                }
+                return false
+            }
+            let topLeft = CGRect(x: 4, y: 4, width: 240, height: 80)
+            check("水印不影响左上角（差分）", !regionDiffers(plain, marked, topLeft))
+            check("水印确实改变了右下角（差分）", regionDiffers(plain, marked, corner))
+            Prefs.watermark = ""
+
+            // 装饰边框：都应让画布变大
+            for f in [FrameStyle.border, .shadow, .torn] {
+                Prefs.frameStyle = f.rawValue
+                let dec = Decorator.apply(base)
+                check("\(f.title) 让导出图变大（留出边距）",
+                      dec.width > base.width && dec.height > base.height,
+                      "\(base.width)×\(base.height) → \(dec.width)×\(dec.height)")
+            }
+            Prefs.frameStyle = FrameStyle.none.rawValue
+            let back = Decorator.apply(base)
+            check("恢复无边框后尺寸复原", back.width == base.width && back.height == base.height)
+        }
+
+        // 固定尺寸选区
+        sc.setTool(.region); pump(0.1)
+        let savedFixed = Prefs.fixedRegion
+        let savedFree = Prefs.freeRegion
+        Prefs.freeRegion = false
+        Prefs.fixedRegion = "500x300"
+        drag([CGPoint(x: 700, y: 400), CGPoint(x: 900, y: 500)]); pump(0.2)
+        if let r = st.region {
+            check("固定尺寸选区：尺寸恒定",
+                  abs(r.width - 500) < 1 && abs(r.height - 300) < 1,
+                  "\(Int(r.width))×\(Int(r.height))")
+        } else {
+            check("固定尺寸选区生效", false, "未建立选区")
+        }
+        Prefs.fixedRegion = ""
+
+        // 自由手绘选区
+        Prefs.freeRegion = true
+        st.region = nil; st.regionPath = nil
+        drag([CGPoint(x: 300, y: 300), CGPoint(x: 600, y: 320),
+              CGPoint(x: 640, y: 560), CGPoint(x: 320, y: 540)]); pump(0.2)
+        check("自由手绘选区记录了多边形", (st.regionPath?.count ?? 0) >= 3,
+              "\(st.regionPath?.count ?? 0) 个顶点")
+        check("手绘选区时矩形选区被清空", st.region == nil)
+        if let full = st.composeCG(), let cut = st.composeCG() {
+            check("手绘选区能导出（不崩溃）", cut.width > 0)
+            // 手绘选区的导出应当比整屏小
+            let cropped = Exporter.currentImage(st, regionOnly: true)
+            check("手绘选区导出结果被裁小", (cropped?.width ?? .max) < full.width,
+                  "\(cropped?.width ?? 0) < \(full.width)")
+        }
+        st.regionPath = nil
+        Prefs.freeRegion = savedFree
+        Prefs.fixedRegion = savedFixed
+        sc.setTool(.pen); pump(0.1)
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")
@@ -729,7 +836,7 @@ enum SelfTest {
         drag([CGPoint(x: 100, y: 90), CGPoint(x: 1400, y: 560)])
         pump(0.1)
         check("选区已建立", st.region != nil, st.region.map { "\(Int($0.width))×\(Int($0.height)) pt" } ?? "nil")
-        if let cg = st.composeCG(region: st.region) {
+        if let cg = st.composeCG(crop: st.region) {
             let expectW = Int(st.region!.width * st.scale)
             check("按选区裁剪导出", cg.width == expectW || abs(cg.width - expectW) <= 2,
                   "导出 \(cg.width)×\(cg.height) px，期望宽 \(expectW)")
@@ -825,7 +932,7 @@ enum SelfTest {
         log("[10] 导出：PNG / JPG / BMP / 剪贴板")
         st.region = nil
         view.needsDisplay = true
-        if let full = st.composeCG(region: nil) {
+        if let full = st.composeCG() {
             var sizes: [String: Int] = [:]
             for fmt in ExportFormat.allCases {
                 if let d = Exporter.encode(full, as: fmt) {
@@ -960,6 +1067,102 @@ enum SelfTest {
                 let expectW = Int(biggest.frame.width * sc2)
                 check("窗口图像尺寸与窗口一致", abs(img.width - expectW) <= 4,
                       "实际 \(img.width) px，期望 \(expectW) px")
+            }
+        }
+
+        // ---- 11d. 旋转 ----
+        log("")
+        log("[11d] 旋转（像素级验证）")
+
+        /// 找出纯红像素的位置（归一化到 0–1），用来判断图有没有真的转
+        func redSpot(_ img: CGImage) -> CGPoint? {
+            var sx = 0, sy = 0, n = 0
+            for y in stride(from: 0, to: img.height, by: 2) {
+                for x in stride(from: 0, to: img.width, by: 2) {
+                    guard let c = PixelSampler.color(of: img, at: CGPoint(x: x, y: y))?
+                                       .usingColorSpace(.sRGB) else { continue }
+                    if c.redComponent > 0.8, c.greenComponent < 0.25, c.blueComponent < 0.25 {
+                        sx += x; sy += y; n += 1
+                    }
+                }
+            }
+            guard n > 0 else { return nil }
+            return CGPoint(x: CGFloat(sx) / CGFloat(n) / CGFloat(img.width),
+                           y: CGFloat(sy) / CGFloat(n) / CGFloat(img.height))
+        }
+
+        // 造一张 64×48、红色只在**图像左上角**的图
+        let rotW = 64, rotH = 48
+        var redAtTopLeft = false
+        if let cs = CGColorSpace(name: CGColorSpace.sRGB),
+           let c = CGContext(data: nil, width: rotW, height: rotH, bitsPerComponent: 8,
+                             bytesPerRow: 0, space: cs,
+                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+            c.setFillColor(NSColor.white.cgColor)
+            c.fill(CGRect(x: 0, y: 0, width: rotW, height: rotH))
+            c.setFillColor(NSColor(srgbRed: 0.9, green: 0.1, blue: 0.1, alpha: 1).cgColor)
+            // CG 上下文 y 向上 → 画在"上方"的矩形对应图像的上部
+            c.fill(CGRect(x: 0, y: rotH - rotH / 2, width: rotW / 2, height: rotH / 2))
+            if let src = c.makeImage() {
+                if let sp = redSpot(src) {
+                    redAtTopLeft = sp.x < 0.35 && sp.y < 0.35
+                    log(String(format: "  原图红点位置 (%.2f, %.2f)", sp.x, sp.y))
+                }
+                check("测试图：红色确实在左上角", redAtTopLeft)
+
+                if let cw = CanvasRenderer.rotate90(src, clockwise: true) {
+                    check("顺时针旋转后宽高对调",
+                          cw.width == rotH && cw.height == rotW,
+                          "\(rotW)×\(rotH) → \(cw.width)×\(cw.height)")
+                    if let sp = redSpot(cw) {
+                        log(String(format: "  顺时针后红点 (%.2f, %.2f)", sp.x, sp.y))
+                        check("顺时针：左上角的红块转到右上角",
+                              sp.x > 0.65 && sp.y < 0.35,
+                              String(format: "(%.2f, %.2f)", sp.x, sp.y))
+                    } else {
+                        check("顺时针后仍能找到红块", false)
+                    }
+                }
+                if let ccw = CanvasRenderer.rotate90(src, clockwise: false) {
+                    if let sp = redSpot(ccw) {
+                        log(String(format: "  逆时针后红点 (%.2f, %.2f)", sp.x, sp.y))
+                        check("逆时针：左上角的红块转到左下角",
+                              sp.x < 0.35 && sp.y > 0.65,
+                              String(format: "(%.2f, %.2f)", sp.x, sp.y))
+                    } else {
+                        check("逆时针后仍能找到红块", false)
+                    }
+                }
+                // 转四次回到原样
+                if let a = CanvasRenderer.rotate90(src, clockwise: true),
+                   let b = CanvasRenderer.rotate90(a, clockwise: true),
+                   let d = CanvasRenderer.rotate90(b, clockwise: true),
+                   let e = CanvasRenderer.rotate90(d, clockwise: true) {
+                    check("旋转四次回到原尺寸", e.width == rotW && e.height == rotH,
+                          "\(e.width)×\(e.height)")
+                    if let s1 = redSpot(src), let s2 = redSpot(e) {
+                        check("旋转四次回到原内容",
+                              abs(s1.x - s2.x) < 0.05 && abs(s1.y - s2.y) < 0.05,
+                              String(format: "(%.2f,%.2f) vs (%.2f,%.2f)", s1.x, s1.y, s2.x, s2.y))
+                    }
+                }
+            }
+        }
+
+        // 画布旋转：尺寸对调、笔画跟着转
+        if let stR = sc.activeCanvas {
+            let before = stR.pointSize
+            let strokeCount = stR.strokes.count
+            sc.rotateCanvas(clockwise: true); pump(0.5)
+            if let after = sc.activeCanvas {
+                check("旋转画布后尺寸对调",
+                      abs(after.pointSize.width - before.height) < 2 &&
+                      abs(after.pointSize.height - before.width) < 2,
+                      "\(Int(before.width))×\(Int(before.height)) → \(Int(after.pointSize.width))×\(Int(after.pointSize.height))")
+                check("旋转后笔画数量不变", after.strokes.count == strokeCount,
+                      "\(strokeCount) → \(after.strokes.count)")
+            } else {
+                check("旋转后仍有画布", false)
             }
         }
 

@@ -18,6 +18,8 @@ final class CanvasState {
     /// 已撤销的笔画（用于重做）。任何新笔画都会清空它 —— 这是撤销栈的标准语义。
     var undoneStrokes: [Stroke] = []
     var region: CGRect?
+    /// 自由手绘选区（多边形，画布局部坐标）。非空时优先于 region。
+    var regionPath: [CGPoint]?
     var background: BackgroundKind = .currentScreen
     var clipboardCG: CGImage?
     var clipboardSize: CGSize = .zero
@@ -80,7 +82,13 @@ final class CanvasState {
     var bounds: CGRect { CGRect(origin: .zero, size: pointSize) }
 
     /// 导出/打印/复制用的合成图（背景 + 标注），按区域裁剪
-    func composeCG(region: CGRect? = nil) -> CGImage? {
+    /// 合成画布。
+    /// - Parameters:
+    ///   - crop: 非空时按该矩形裁剪
+    ///   - path: 非空时按多边形遮罩（自由手绘选区）
+    /// 早先这里叫 `composeCG(region:)`，参数名遮蔽了同名属性，
+    /// 而 `regionPath` 又无条件生效 —— 于是"取整张图"在有手绘选区时拿到的是裁过的图。
+    func composeCG(crop: CGRect? = nil, path: [CGPoint]? = nil) -> CGImage? {
         let cs = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         let pw = Int((pointSize.width * scale).rounded())
         let ph = Int((pointSize.height * scale).rounded())
@@ -95,7 +103,39 @@ final class CanvasState {
             CanvasRenderer.drawFullImage(ctx, layerImg, size: pointSize)
         }
         guard let full = ctx.makeImage() else { return nil }
-        guard let r = region else { return full }
+
+        // 自由手绘选区：按路径做遮罩，只保留多边形内部
+        if let path, path.count >= 3 {
+            let xs = path.map { $0.x }, ys = path.map { $0.y }
+            let box = CGRect(x: xs.min()!, y: ys.min()!,
+                             width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+            let px = CGRect(x: box.minX * scale, y: box.minY * scale,
+                            width: box.width * scale, height: box.height * scale).integral
+            let pw2 = Int(px.width), ph2 = Int(px.height)
+            let cs2 = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+            guard pw2 > 1, ph2 > 1,
+                  let mctx = CGContext(data: nil, width: pw2, height: ph2, bitsPerComponent: 8,
+                                       bytesPerRow: 0, space: cs2,
+                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return full }
+            mctx.scaleBy(x: scale, y: scale)
+            mctx.translateBy(x: -box.minX, y: box.maxY)
+            mctx.scaleBy(x: 1, y: -1)
+            let mp = CGMutablePath()
+            mp.move(to: path[0])
+            for p in path.dropFirst() { mp.addLine(to: p) }
+            mp.closeSubpath()
+            mctx.addPath(mp)
+            mctx.clip()
+            // clip 之后再画整张图，落进画布的只有多边形内部
+            mctx.translateBy(x: box.minX, y: -box.maxY)
+            mctx.scaleBy(x: 1, y: -1)
+            mctx.translateBy(x: 0, y: pointSize.height)
+            mctx.scaleBy(x: 1, y: -1)
+            mctx.draw(full, in: CGRect(origin: .zero, size: pointSize))
+            return mctx.makeImage() ?? full
+        }
+
+        guard let r = crop else { return full }
         let crop = CGRect(x: r.minX * scale, y: r.minY * scale,
                           width: r.width * scale, height: r.height * scale).integral
         return full.cropping(to: crop) ?? full
@@ -104,7 +144,7 @@ final class CanvasState {
     /// 缩放视图里显示的源图（背景 + 标注），带缓存
     func zoomSource() -> CGImage? {
         if let c = composedCache { return c }
-        let c = composeCG(region: nil)
+        let c = composeCG()
         composedCache = c
         return c
     }
@@ -178,6 +218,22 @@ enum CanvasRenderer {
     }
 
     /// 在 y 轴向下的上下文里正向绘制一张铺满画布的位图
+    /// 把整张图旋转 90°。`clockwise` 为真表示顺时针。
+    /// 图像坐标系 y 向下、CG 上下文 y 向上，所以"顺时针"在这里是 -90°。
+    static func rotate90(_ img: CGImage, clockwise: Bool) -> CGImage? {
+        let w = img.width, h = img.height
+        let cs = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: h, height: w, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.translateBy(x: CGFloat(h) / 2, y: CGFloat(w) / 2)
+        ctx.rotate(by: clockwise ? -.pi / 2 : .pi / 2)
+        ctx.translateBy(x: -CGFloat(w) / 2, y: -CGFloat(h) / 2)
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return ctx.makeImage()
+    }
+
     static func drawFullImage(_ ctx: CGContext, _ img: CGImage, size: CGSize) {
         ctx.saveGState()
         ctx.translateBy(x: 0, y: size.height)
@@ -470,6 +526,29 @@ final class CanvasView: NSView {
     }
 
     private func drawRegion(_ ctx: CGContext) {
+        // 自由手绘选区：描出多边形轮廓
+        if let path = state.regionPath, path.count >= 2 {
+            ctx.saveGState()
+            let p = CGMutablePath()
+            p.move(to: path[0])
+            for q in path.dropFirst() { p.addLine(to: q) }
+            p.closeSubpath()
+            ctx.setLineWidth(1)
+            NSColor.white.setStroke()
+            ctx.addPath(p); ctx.strokePath()
+            ctx.setLineDash(phase: 0, lengths: [5, 4])
+            NSColor.black.setStroke()
+            ctx.addPath(p); ctx.strokePath()
+            ctx.restoreGState()
+            let xs = path.map { $0.x }, ys = path.map { $0.y }
+            let label = "\(Int((xs.max()! - xs.min()!) * state.scale)) × \(Int((ys.max()! - ys.min()!) * state.scale)) px"
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+                .foregroundColor: NSColor.white
+            ]
+            (label as NSString).draw(at: NSPoint(x: xs.min()!, y: ys.min()! - 12), withAttributes: attrs)
+            return
+        }
         guard let r = state.region else { return }
         ctx.saveGState()
         ctx.setLineWidth(1)
@@ -505,7 +584,10 @@ final class CanvasView: NSView {
             }
         } else {
             parts.append("X \(px)  Y \(py)")
-            if c.tool == .region, let r = state.region {
+            if c.tool == .region, let path = state.regionPath, path.count >= 2 {
+                let xs = path.map { $0.x }, ys = path.map { $0.y }
+                parts.append("\(Int((xs.max()! - xs.min()!) * state.scale))×\(Int((ys.max()! - ys.min()!) * state.scale))")
+            } else if c.tool == .region, let r = state.region {
                 parts.append("\(Int(r.minX * state.scale)),\(Int(r.minY * state.scale))  \(Int(r.width * state.scale))×\(Int(r.height * state.scale))")
             }
         }
@@ -650,6 +732,13 @@ final class CanvasView: NSView {
         case .cross:
             commit(Stroke(shape: .cross(p, w * 2.4 + 14), color: strokeColor, width: w))
         case .region:
+            if Prefs.freeRegion {
+                state.regionPath = [p]
+                state.region = nil
+                regionDragStart = p
+                needsDisplay = true
+                return
+            }
             if let r = state.region, r.insetBy(dx: -2, dy: -2).contains(p) {
                 if p.y <= r.minY + 12 {
                     regionMoveOffset = CGPoint(x: p.x - r.minX, y: p.y - r.minY)
@@ -754,7 +843,22 @@ final class CanvasView: NSView {
             if let off = regionMoveOffset, let r = state.region {
                 state.region = CGRect(x: p.x - off.x, y: p.y - off.y, width: r.width, height: r.height)
             } else if regionDragStart != nil {
-                state.region = makeRect(dragStart, p, constrain: shift)
+                if Prefs.freeRegion {
+                    // 自由手绘：累积轨迹
+                    var pts = state.regionPath ?? []
+                    if let last = pts.last, hypot(p.x - last.x, p.y - last.y) > 2 { pts.append(p) }
+                    else if pts.isEmpty { pts.append(p) }
+                    state.regionPath = pts
+                    state.region = nil
+                } else if let fixed = Prefs.fixedRegionSize {
+                    // 固定尺寸：左上角跟随光标，尺寸恒定
+                    state.region = CGRect(x: min(dragStart.x, p.x), y: min(dragStart.y, p.y),
+                                          width: fixed.width, height: fixed.height)
+                    state.regionPath = nil
+                } else {
+                    state.region = makeRect(dragStart, p, constrain: shift)
+                    state.regionPath = nil
+                }
             }
             needsDisplay = true
         case .magnifier:
@@ -800,6 +904,7 @@ final class CanvasView: NSView {
         case .region:
             regionDragStart = nil
             regionMoveOffset = nil
+            if let path = state.regionPath, path.count < 3 { state.regionPath = nil }
             if let r = state.region, r.width < 2 || r.height < 2 { state.region = nil }
             needsDisplay = true
         default:

@@ -29,6 +29,11 @@ enum Prefs {
         static let captureDelay = "captureDelay"
         static let historyEnabled = "historyEnabled"
         static let historyLimit = "historyLimit"
+        static let captureCursor = "captureCursor"
+        static let watermark = "watermark"
+        static let frameStyle = "frameStyle"
+        static let fixedRegion = "fixedRegion"
+        static let freeRegion = "freeRegion"
         static let language = "language"
         static let hotKeyCode = "hotKeyCode"
         static let hotKeyModifiers = "hotKeyModifiers"
@@ -61,7 +66,12 @@ enum Prefs {
             K.filenameTemplate: "{app}-{date}-{time}",
             K.captureDelay: 0,
             K.historyEnabled: true,
-            K.historyLimit: 20
+            K.historyLimit: 20,
+            K.captureCursor: false,
+            K.watermark: "",
+            K.frameStyle: FrameStyle.none.rawValue,
+            K.fixedRegion: "",
+            K.freeRegion: false
         ])
     }
 
@@ -137,6 +147,43 @@ enum Prefs {
     static var captureDelay: Int {
         get { max(0, min(30, d.integer(forKey: K.captureDelay))) }
         set { d.set(newValue, forKey: K.captureDelay) }
+    }
+
+    /// 截图时是否包含鼠标指针
+    static var captureCursor: Bool {
+        get { d.bool(forKey: K.captureCursor) }
+        set { d.set(newValue, forKey: K.captureCursor) }
+    }
+
+    /// 固定尺寸选区，形如 "800x600"。空 = 自由拖拽。
+    static var fixedRegion: String {
+        get { d.string(forKey: K.fixedRegion) ?? "" }
+        set { d.set(newValue, forKey: K.fixedRegion) }
+    }
+
+    /// 解析后的固定尺寸；nil 表示自由拖拽
+    static var fixedRegionSize: CGSize? {
+        let parts = fixedRegion.lowercased().split(separator: "x").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, let w = Double(parts[0]), let h = Double(parts[1]), w >= 8, h >= 8 else { return nil }
+        return CGSize(width: w, height: h)
+    }
+
+    /// 选区工具是否使用自由手绘（多边形）而不是矩形
+    static var freeRegion: Bool {
+        get { d.bool(forKey: K.freeRegion) }
+        set { d.set(newValue, forKey: K.freeRegion) }
+    }
+
+    /// 水印文字（空 = 不加水印）
+    static var watermark: String {
+        get { d.string(forKey: K.watermark) ?? "" }
+        set { d.set(newValue, forKey: K.watermark) }
+    }
+
+    /// 导出时的装饰边框
+    static var frameStyle: String {
+        get { d.string(forKey: K.frameStyle) ?? FrameStyle.none.rawValue }
+        set { d.set(newValue, forKey: K.frameStyle) }
     }
 
     /// 是否把每次结束的捕捉存进历史

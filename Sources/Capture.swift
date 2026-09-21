@@ -74,7 +74,7 @@ enum ScreenCapture {
                 let cfg = SCStreamConfiguration()
                 cfg.width = Int((pointSize.width * scale).rounded())
                 cfg.height = Int((pointSize.height * scale).rounded())
-                cfg.showsCursor = false
+                cfg.showsCursor = Prefs.captureCursor
                 cfg.captureResolution = .best
                 cfg.scalesToFit = false
                 cfg.ignoreShadowsDisplay = true

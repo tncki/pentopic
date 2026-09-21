@@ -602,7 +602,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         // 同样要求真的有底图，否则记下来的只是白板。
         if !quiet, Prefs.historyEnabled {
             for st in canvases where st.frozenCG != nil {
-                if let img = st.composeCG(region: nil) { CaptureHistory.record(img) }
+                if let img = st.composeCG() { CaptureHistory.record(img) }
             }
         }
 
@@ -795,7 +795,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         model.canUndo = !(activeCanvas?.strokes.isEmpty ?? true)
         model.canRedo = !(activeCanvas?.undoneStrokes.isEmpty ?? true)
         model.hasStrokes = model.canUndo
-        model.hasRegion = activeCanvas?.region != nil
+        model.hasRegion = activeCanvas.map { $0.region != nil || $0.regionPath != nil } ?? false
         model.screenName = activeCanvas?.screen.localizedName ?? ""
     }
 
@@ -875,7 +875,7 @@ final class SessionController: NSObject, NSMenuDelegate {
     // MARK: 取色
 
     func sampleColor(canvas st: CanvasState, at point: CGPoint) {
-        guard let img = st.composeCG(region: nil),
+        guard let img = st.composeCG(),
               let col = PixelSampler.color(of: img, at: CGPoint(x: point.x * st.scale, y: point.y * st.scale)) else { return }
         if colorInfo == nil { colorInfo = ColorInfoPanel() }
         colorInfo?.show(col, at: NSEvent.mouseLocation)
@@ -1058,16 +1058,60 @@ final class SessionController: NSObject, NSMenuDelegate {
         }
     }
 
+    // MARK: 旋转画布
+
+    /// 把整块画布旋转 90°：底图和所有笔画一起转，转完还能继续标注和撤销。
+    /// 只转图不转笔画会让标注和图像错位，所以两者必须共用同一套坐标变换。
+    func rotateCanvas(clockwise: Bool) {
+        guard let st = activeCanvas else { return }
+        let oldSize = st.pointSize
+        guard oldSize.width > 1, oldSize.height > 1 else { return }
+        let newSize = CGSize(width: oldSize.height, height: oldSize.width)
+
+        let newImage: CGImage?
+        if let src = st.frozenCG {
+            guard let r = CanvasRenderer.rotate90(src, clockwise: clockwise) else { return }
+            newImage = r
+        } else {
+            newImage = nil
+        }
+        let q = clockwise ? 1 : 3
+        let rotated = st.strokes.map { Stroke(shape: $0.shape.rotated(canvasSize: oldSize, quarterTurns: q),
+                                              color: $0.color, width: $0.width, isEraser: $0.isEraser) }
+        // 保持左上角不动，尺寸对调
+        let rect = CGRect(x: st.rect.minX, y: st.rect.minY, width: newSize.width, height: newSize.height)
+        var spec = CanvasSpec(screen: st.screen, image: newImage, rect: rect)
+        spec.strokes = rotated
+        buildSession(specs: [spec])
+        flashStatus(clockwise
+            ? LS("Um 90° gedreht", "Rotated 90° clockwise", "已顺时针旋转 90°", "已順時針旋轉 90°")
+            : LS("Um 90° gedreht", "Rotated 90° anticlockwise", "已逆时针旋转 90°", "已逆時針旋轉 90°"))
+    }
+
     // MARK: 区域捕捉
 
     /// 把当前画布裁剪到选中的区域：只保留那一块，成为新的画布。
     /// 已有笔画会整体平移过去，所以裁剪后仍然可以继续编辑和撤销。
     func cropToRegion() {
-        guard let st = activeCanvas, let r = st.region, r.width > 16, r.height > 16 else {
+        guard let st = activeCanvas else { return }
+        // 自由手绘选区用多边形的包围盒来裁剪
+        let r: CGRect
+        if let path = st.regionPath, path.count >= 3 {
+            let xs = path.map { $0.x }, ys = path.map { $0.y }
+            r = CGRect(x: xs.min()!, y: ys.min()!,
+                       width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+        } else if let rect = st.region {
+            r = rect
+        } else {
             flashStatus(LS("Bitte zuerst mit dem Bereich-Werkzeug einen Bereich aufziehen.",
                            "Select a region with the region tool first.",
                            "请先用「选区」工具框出一块区域。",
                            "請先用「選取範圍」工具框出一塊區域。"))
+            return
+        }
+        guard r.width > 16, r.height > 16 else {
+            flashStatus(LS("Der Bereich ist zu klein.", "The region is too small.",
+                           "选区太小了。", "選取範圍太小了。"))
             return
         }
         guard let frozen = st.frozenCG else {
@@ -1144,7 +1188,7 @@ final class SessionController: NSObject, NSMenuDelegate {
             if let st = activeCanvas, st.isZoomed { views.forEach { $0.enterZoom(1, center: nil) }; applyTool(previousTool, silent: false); return true }
             finish(); return true
         case 123, 124, 125, 126: // 方向键移动选区
-            guard tool == .region, activeCanvas?.region != nil else { return false }
+            guard tool == .region, activeCanvas.map({ $0.region != nil || $0.regionPath != nil }) == true else { return false }
             let step: CGFloat = shift ? 10 : 1
             let dx: CGFloat = event.keyCode == 123 ? -step : (event.keyCode == 124 ? step : 0)
             let dy: CGFloat = event.keyCode == 125 ? step : (event.keyCode == 126 ? -step : 0)
@@ -1226,8 +1270,18 @@ final class SessionController: NSObject, NSMenuDelegate {
                                             "裁剪到选区", "裁剪到選取範圍"),
                                   action: #selector(menuCrop), keyEquivalent: "")
         cropItem.target = self
-        cropItem.isEnabled = (activeCanvas?.region != nil)
+        cropItem.isEnabled = activeCanvas.map { $0.region != nil || $0.regionPath != nil } ?? false
         m.addItem(cropItem)
+        let rotL = NSMenuItem(title: LS("Um 90° nach links drehen", "Rotate 90° left",
+                                        "向左旋转 90°", "向左旋轉 90°"),
+                              action: #selector(menuRotateLeft), keyEquivalent: "")
+        rotL.target = self
+        m.addItem(rotL)
+        let rotR = NSMenuItem(title: LS("Um 90° nach rechts drehen", "Rotate 90° right",
+                                        "向右旋转 90°", "向右旋轉 90°"),
+                              action: #selector(menuRotateRight), keyEquivalent: "")
+        rotR.target = self
+        m.addItem(rotR)
         m.addItem(.separator())
         add(LS("Kopieren (⌘C)","Copy (⌘C)","复制到剪贴板 (⌘C)", "複製到剪貼簿 (⌘C)"), #selector(menuCopy), "c")
         add(LS("Speichern (⌘S)","Save (⌘S)","保存图片 (⌘S)", "儲存圖片 (⌘S)"), #selector(menuSave), "s")
@@ -1246,6 +1300,8 @@ final class SessionController: NSObject, NSMenuDelegate {
     @objc private func menuUndo() { undo() }
     @objc private func menuClear() { clearAll() }
     @objc private func menuCrop() { cropToRegion() }
+    @objc private func menuRotateLeft() { rotateCanvas(clockwise: false) }
+    @objc private func menuRotateRight() { rotateCanvas(clockwise: true) }
     @objc private func menuCopy() { Exporter.copyToClipboard(activeCanvas) }
     @objc private func menuSave() { Exporter.saveWithPanel(activeCanvas, screen: activeCanvas?.screen) }
     @objc private func menuPrint() { Exporter.print(activeCanvas) }

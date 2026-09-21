@@ -374,6 +374,14 @@ struct ToolbarView: View {
                               "裁剪到选区", "裁剪到選取範圍")) {
                         controller.cropToRegion()
                     }
+                    Button(LS("Um 90° nach links drehen", "Rotate 90° left",
+                              "向左旋转 90°", "向左旋轉 90°")) {
+                        controller.rotateCanvas(clockwise: false)
+                    }
+                    Button(LS("Um 90° nach rechts drehen", "Rotate 90° right",
+                              "向右旋转 90°", "向右旋轉 90°")) {
+                        controller.rotateCanvas(clockwise: true)
+                    }
                     Divider()
                     Button(LS("Layout speichern …", "Save layout …", "保存布局 …", "儲存版面 …")) {
                         LayoutConfig.save()

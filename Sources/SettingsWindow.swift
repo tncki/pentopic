@@ -18,6 +18,11 @@ final class SettingsModel: ObservableObject {
     @Published var extraColors: [String] = []
     @Published var filenameTemplate = "{app}-{date}-{time}"
     @Published var captureDelay = 0
+    @Published var captureCursor = false
+    @Published var watermark = ""
+    @Published var fixedRegion = ""
+    @Published var freeRegion = false
+    @Published var frameStyle = "none"
     @Published var historyEnabled = true
     @Published var historyLimit = 20
     @Published var hotKeySpec: HotKeySpec = .default
@@ -39,6 +44,11 @@ final class SettingsModel: ObservableObject {
         extraColors = Prefs.extraColors
         filenameTemplate = Prefs.filenameTemplate
         captureDelay = Prefs.captureDelay
+        captureCursor = Prefs.captureCursor
+        watermark = Prefs.watermark
+        fixedRegion = Prefs.fixedRegion
+        freeRegion = Prefs.freeRegion
+        frameStyle = Prefs.frameStyle
         historyEnabled = Prefs.historyEnabled
         historyLimit = Prefs.historyLimit
         hotKeySpec = Prefs.hotKeySpec
@@ -62,6 +72,11 @@ final class SettingsModel: ObservableObject {
         Prefs.setEmailFolder(URL(fileURLWithPath: (emailFolder as NSString).expandingTildeInPath))
         Prefs.filenameTemplate = filenameTemplate.isEmpty ? "{app}-{date}-{time}" : filenameTemplate
         Prefs.captureDelay = captureDelay
+        Prefs.captureCursor = captureCursor
+        Prefs.watermark = watermark
+        Prefs.fixedRegion = fixedRegion
+        Prefs.freeRegion = freeRegion
+        Prefs.frameStyle = frameStyle
         Prefs.historyEnabled = historyEnabled
         Prefs.historyLimit = historyLimit
         CaptureHistory.prune()
@@ -168,6 +183,45 @@ struct SettingsView: View {
                                 Text("10 s").tag(10)
                             }.labelsHidden().frame(width: 120)
                         }
+                    }
+
+                    group(LS("Ausgabe", "Output", "输出效果", "輸出效果")) {
+                        Toggle(LS("Mauszeiger mit aufnehmen", "Include the mouse pointer",
+                                  "截图时包含鼠标指针", "截圖時包含滑鼠指標"),
+                               isOn: $m.captureCursor)
+                        HStack(spacing: 8) {
+                            Text(LS("Wasserzeichen", "Watermark", "水印文字", "浮水印文字"))
+                                .frame(width: 150, alignment: .leading)
+                            TextField(LS("leer = kein Wasserzeichen", "empty = no watermark",
+                                         "留空 = 不加水印", "留空 = 不加水印"),
+                                      text: $m.watermark)
+                                .frame(width: 230)
+                                .onSubmit { m.save() }
+                        }
+                        HStack(spacing: 8) {
+                            Text(LS("Bereichsgröße", "Region size", "选区尺寸", "選取範圍尺寸"))
+                                .frame(width: 150, alignment: .leading)
+                            TextField(LS("z. B. 800x600, leer = frei", "e.g. 800x600, empty = free",
+                                         "如 800x600，留空 = 自由拖拽", "如 800x600，留空 = 自由拖曳"),
+                                      text: $m.fixedRegion)
+                                .frame(width: 180)
+                                .onSubmit { m.save() }
+                            Toggle(LS("Freihand", "Freehand", "自由手绘", "自由手繪"), isOn: $m.freeRegion)
+                        }
+                        HStack(spacing: 8) {
+                            Text(LS("Rahmen", "Frame", "装饰边框", "裝飾邊框"))
+                                .frame(width: 150, alignment: .leading)
+                            Picker("", selection: $m.frameStyle) {
+                                ForEach(FrameStyle.allCases, id: \.rawValue) { f in
+                                    Text(f.title).tag(f.rawValue)
+                                }
+                            }.labelsHidden().frame(width: 160)
+                        }
+                        Text(LS("Wasserzeichen und Rahmen wirken nur auf gespeicherte/versendete Bilder, nicht auf die Arbeitsfläche.",
+                                "Watermark and frame apply to saved or shared images only, not to the canvas.",
+                                "水印与边框只作用于导出/发送的图片，不影响标注画布。",
+                                "浮水印與邊框只作用於匯出/傳送的圖片，不影響標註畫布。"))
+                            .font(.system(size: 10)).foregroundColor(.secondary)
                     }
 
                     group(LS("Aufnahmeverlauf", "Capture history", "捕捉历史", "捕捉歷史")) {

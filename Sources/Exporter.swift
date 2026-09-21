@@ -28,10 +28,12 @@ enum Exporter {
 
     // MARK: 取图
 
+    /// 所有导出路径的唯一漏斗 —— 装饰与水印挂在这里，一处生效全路径
     static func currentImage(_ st: CanvasState?, regionOnly: Bool = true) -> CGImage? {
         guard let st else { return nil }
-        let r = (regionOnly ? st.region : nil)
-        return st.composeCG(region: r)
+        guard let base = st.composeCG(crop: regionOnly ? st.region : nil,
+                                      path: regionOnly ? st.regionPath : nil) else { return nil }
+        return Decorator.apply(base)
     }
 
     static func encode(_ cg: CGImage, as format: ExportFormat, quality: CGFloat = 0.9) -> Data? {
@@ -178,7 +180,7 @@ enum Exporter {
     /// 'Fertig' 时自动截图（整屏，忽略选区）
     static func autoScreenshot(_ st: CanvasState) {
         let fmt: ExportFormat = Prefs.autoScreenshotFormat == "jpg" ? .jpg : .png
-        guard let cg = st.composeCG(region: nil) else { return }
+        guard let cg = st.composeCG() else { return }
         Prefs.ensureFolders()
         let url = uniqueURL(in: Prefs.screenshotFolder, format: fmt)
         if let data = encode(cg, as: fmt) { try? data.write(to: url) }

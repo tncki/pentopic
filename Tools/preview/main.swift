@@ -297,7 +297,7 @@ if let st = CanvasState(screen: screen, captured: cap) {
     strokes.append(Stroke(shape: .number(3, CGPoint(x: 280, y: 470), 44, .circle), color: NSColor.black, width: 4))
     strokes.append(Stroke(shape: .spotlight(CGRect(x: 420, y: 400, width: 360, height: 180)), color: red, width: 4))
     for s in strokes { st.layer.apply(s); st.strokes.append(s) }
-    if let cg = st.composeCG(region: nil) {
+    if let cg = st.composeCG() {
         let url = outDir.appendingPathComponent("02-tools.png")
         let rep = NSBitmapImageRep(cgImage: cg)
         try? rep.representation(using: .png, properties: [:])?.write(to: url)
@@ -312,7 +312,7 @@ if let st = CanvasState(screen: screen, captured: cap) {
     let s2 = Stroke(shape: .rect(CGRect(x: 190, y: 190, width: 420, height: 80)), color: Palette.blue, width: 4)
     let s3 = Stroke(shape: .arrow(CGPoint(x: 900, y: 400), CGPoint(x: 620, y: 240)), color: Palette.red, width: 8)
     for s in [s1, s2, s3] { st.layer.apply(s); st.strokes.append(s) }
-    if let cg = st.composeCG(region: nil) {
+    if let cg = st.composeCG() {
         let url = outDir.appendingPathComponent("03-compose.png")
         try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: url)
         print("wrote \(url.path)  \(cg.width)x\(cg.height)")

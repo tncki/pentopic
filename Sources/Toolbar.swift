@@ -191,25 +191,44 @@ struct ToolbarView: View {
     }
 
     /// 工具槽位：固定工具，或可被右键替换的形状槽位
-    private enum ToolSlot {
+    enum ToolSlot {
         case fixed(ToolKind)
         case shape(Int)          // 索引指向 Prefs.shapeCatalog
+
+        /// 这一格实际用哪个工具（形状槽位要查表）
+        var resolved: ToolKind {
+            switch self {
+            case .fixed(let t): return t
+            case .shape(let i):
+                let slots = Prefs.shapeCatalog
+                return i < slots.count ? slots[i] : .line
+            }
+        }
     }
 
+    /// 默认布局。定义为静态常量是为了让自检能校验"每个工具都有按钮" ——
+    /// 之前选择工具就因为一次替换静默失败而根本没进工具栏，
+    /// 只能靠快捷键调用，用户找不到它。
+    static let toolRowLayout: [[ToolSlot]] = {
+        let shapes = Prefs.shapeCatalog
+        func sh(_ i: Int) -> ToolSlot { .shape(i) }
+        _ = shapes
+        return [[.fixed(.select), .fixed(.pen)],          // 指针在最前 —— 它是默认工具
+                [.fixed(.eraser), .fixed(.text)],
+                [sh(0), sh(1)],                           // 直线 / 箭头
+                [sh(3), sh(4)],                           // 矩形 / 实心矩形
+                [sh(5), sh(6)],                           // 椭圆 / 实心椭圆
+                [sh(2), .fixed(.spotlight)],              // 双向箭头 / 聚焦
+                [.fixed(.check), .fixed(.cross)],
+                [.fixed(.number), .fixed(.ruler)],        // 序号 / 标尺
+                [.fixed(.blur), .fixed(.pixelate)],
+                [.fixed(.region), .fixed(.eyedropper)],
+                [.fixed(.magnifier), .fixed(.zoomIn)],
+                [.fixed(.zoomOut)]]
+    }()
+
     /// 11 行 × 2 列。第 2–5 行是可自定义的形状槽位。
-    private var toolRows: [[ToolSlot]] {
-        [[.fixed(.pen), .fixed(.eraser)],
-         [.shape(0), .shape(1)],                      // 直线 / 箭头
-         [.shape(3), .shape(4)],                      // 矩形 / 实心矩形
-         [.shape(5), .shape(6)],                      // 椭圆 / 实心椭圆
-         [.shape(2), .fixed(.text)],                  // 双向箭头 / 文字
-         [.fixed(.check), .fixed(.cross)],
-         [.fixed(.number), .fixed(.spotlight)],
-         [.fixed(.blur), .fixed(.pixelate)],
-         [.fixed(.eyedropper), .fixed(.region)],
-         [.fixed(.magnifier), .fixed(.zoomIn)],
-         [.fixed(.ruler), .fixed(.zoomOut)]]
-    }
+    private var toolRows: [[ToolSlot]] { Self.toolRowLayout }
 
     var body: some View {
         VStack(spacing: 4) {

@@ -940,6 +940,34 @@ enum SelfTest {
 
         sc.setTool(.pen); pump(0.1); sc.setSwatch(0)
 
+        // ---- 4k. 工具栏覆盖性 ----
+        // 每个工具都必须有按钮。选择工具曾经因为一次字符串替换静默失败而根本没进工具栏，
+        // 只能靠 V 键调用 —— 用户找不到它，还以为这个功能不存在。
+        log("")
+        log("[4k] 工具栏覆盖性")
+        var placedTools = Set<ToolKind>()
+        for row in ToolbarView.toolRowLayout {
+            for slot in row { placedTools.insert(slot.resolved) }
+        }
+        let missing = ToolKind.allCases.filter { !placedTools.contains($0) }
+        check("工具栏覆盖全部 \(ToolKind.allCases.count) 个工具",
+              missing.isEmpty,
+              missing.isEmpty ? "全部覆盖" : "缺失: " + missing.map { $0.rawValue }.joined(separator: ", "))
+        check("指针排在最前（默认工具应当好找）",
+              ToolbarView.toolRowLayout.first?.first?.resolved == .select,
+              ToolbarView.toolRowLayout.first?.first?.resolved.rawValue ?? "空")
+
+        // 默认工具设置
+        let savedDefault = Prefs.defaultToolMode
+        Prefs.defaultToolMode = "select"
+        check("默认工具：指针", Prefs.initialTool == .select, Prefs.initialTool.rawValue)
+        Prefs.defaultToolMode = "pen"
+        check("默认工具：画笔", Prefs.initialTool == .pen, Prefs.initialTool.rawValue)
+        Prefs.defaultToolMode = "last"
+        Prefs.lastTool = .arrow
+        check("默认工具：上次使用", Prefs.initialTool == .arrow, Prefs.initialTool.rawValue)
+        Prefs.defaultToolMode = savedDefault
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

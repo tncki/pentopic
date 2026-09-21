@@ -581,8 +581,11 @@ final class SessionController: NSObject, NSMenuDelegate {
         magnifier = MagnifierPanel()
         toast = ToastPanel()
         SettingsWindowController.shared.adaptToSession()
+        // 每次开新会话都回到用户设定的初始工具。
+        // 默认是指针：刚冻结屏幕时最可能先做的事是看看、挪一挪已有的标记，
+        // 而不是立刻落笔；指针也不会因为误拖而在画面上留下东西。
+        applyTool(Prefs.initialTool, silent: true)
         syncModel()
-        applyTool(tool, silent: true)
 
     }
 

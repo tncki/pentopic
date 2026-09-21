@@ -34,6 +34,7 @@ enum Prefs {
         static let frameStyle = "frameStyle"
         static let fixedRegion = "fixedRegion"
         static let freeRegion = "freeRegion"
+        static let defaultTool = "defaultTool"
         static let language = "language"
         static let hotKeyCode = "hotKeyCode"
         static let hotKeyModifiers = "hotKeyModifiers"
@@ -71,7 +72,8 @@ enum Prefs {
             K.watermark: "",
             K.frameStyle: FrameStyle.none.rawValue,
             K.fixedRegion: "",
-            K.freeRegion: false
+            K.freeRegion: false,
+            K.defaultTool: "select"
         ])
     }
 
@@ -153,6 +155,24 @@ enum Prefs {
     static var captureCursor: Bool {
         get { d.bool(forKey: K.captureCursor) }
         set { d.set(newValue, forKey: K.captureCursor) }
+    }
+
+    /// 会话开始时的默认工具：
+    /// "select" = 指针（默认，移动/对齐已有标记）
+    /// "last"   = 上次用过的工具
+    /// "pen"    = 画笔
+    static var defaultToolMode: String {
+        get { d.string(forKey: K.defaultTool) ?? "select" }
+        set { d.set(newValue, forKey: K.defaultTool) }
+    }
+
+    /// 解析出的初始工具
+    static var initialTool: ToolKind {
+        switch defaultToolMode {
+        case "last": return lastTool
+        case "pen":  return .pen
+        default:     return .select
+        }
     }
 
     /// 固定尺寸选区，形如 "800x600"。空 = 自由拖拽。

@@ -33,7 +33,23 @@ jobs:
         run: python3 Tools/check-l10n.py
 
       - name: 构建（通用二进制）
-        run: ./build.sh --universal
+        run: |
+          set -o pipefail
+          if ./build.sh --universal 2>&1 | tee /tmp/build.log; then
+            exit 0
+          fi
+          # Actions 日志需要仓库管理员权限才能下载，annotation 通过公开 API 可读。
+          # 构建失败时把关键行作为 annotation 发出来。
+          if [ -f /tmp/build.log ]; then
+            grep -nE "error:|错误|!!|fatal|No such|cannot find|not found|Undefined|unable" /tmp/build.log \
+              | head -6 | cut -c1-600 | while IFS= read -r l; do
+                echo "::error title=构建错误::${l//$'\n'/ }"
+              done
+            tail -3 /tmp/build.log | cut -c1-600 | while IFS= read -r l; do
+              echo "::error title=日志尾部::${l//$'\n'/ }"
+            done
+          fi
+          exit 1
 
       - name: 校验产物
         run: |

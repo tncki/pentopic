@@ -11,6 +11,12 @@ jobs:
     # 公共仓库的 macOS runner 免费；构建产物是「通用二进制」，Intel 与 Apple Silicon 通用
     runs-on: macos-14
     steps:
+
+      - name: 手册转换器自检
+        run: python3 Tools/md2html.py --selftest
+
+      - name: 校验手册能生成
+        run: python3 Tools/md2html.py HELP.md > /dev/null
       - uses: actions/checkout@v4
 
       - name: 环境信息

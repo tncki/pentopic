@@ -108,7 +108,7 @@ compile_slice() {   # $1 = target triple, $2 = 输出路径
     -module-name "AppModule" \
     -module-cache-path "$CACHE/clang" \
     -framework AppKit -framework SwiftUI -framework ScreenCaptureKit \
-    -framework Carbon -framework UniformTypeIdentifiers \
+    -framework Carbon -framework UniformTypeIdentifiers -framework WebKit \
     -o "$2" \
     "$ROOT"/Sources/*.swift
 }
@@ -127,6 +127,16 @@ fi
 cp "$PLIST" "$APP/Contents/Info.plist"
 [ -f "$ROOT/Resources/AppIcon.icns" ] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/"
 cp "$ROOT/Resources/PrivacyInfo.xcprivacy" "$APP/Contents/Resources/"
+
+# 使用手册转成单文件 HTML 打包进 .app —— 离线可读，不依赖网络。
+# 转换器是自写的（本项目零第三方依赖），只覆盖手册实际用到的语法。
+if [ -f "$ROOT/HELP.md" ]; then
+  if python3 "$ROOT/Tools/md2html.py" "$ROOT/HELP.md" > "$APP/Contents/Resources/Help.html"; then
+    echo "==> 使用手册: Help.html ($(wc -c < "$APP/Contents/Resources/Help.html" | tr -d ' ') 字节)"
+  else
+    echo "⚠️  使用手册转换失败，应用内帮助将不可用" >&2
+  fi
+fi
 
 # 为每种界面语言建一个 .lproj 目录：只有 CFBundleLocalizations 还不够，
 # AppKit 还要看包里实际存在哪些 .lproj 才会把系统面板（打开/保存对话框）切成对应语言。

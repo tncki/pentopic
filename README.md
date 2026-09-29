@@ -23,6 +23,9 @@
 >
 > 注意措辞是 *„keine Einwände"*（**不反对**），**不是**背书或官方合作。
 
+📖 **[`HELP.md`](HELP.md) 使用手册** —— 安装、工具详解、进阶用法、疑难解答、快捷键总表。
+应用内也有：**设置 › 关于 › 使用手册**（构建时转成 HTML 打包，离线可读）。
+
 📄 [`CHANGELOG.md`](CHANGELOG.md) 版本变更 · [`NOTICE.md`](NOTICE.md) 署名与权利 ·
 [`AUTHORIZATION.md`](AUTHORIZATION.md) 原作者许可存档 · [`ROADMAP.md`](ROADMAP.md) 功能规划
 

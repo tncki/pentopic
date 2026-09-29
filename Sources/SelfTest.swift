@@ -1387,6 +1387,38 @@ enum SelfTest {
         sc.clearAll(); pump(0.15)
         sc.setTool(.pen); sc.setSwatch(0)
 
+        // ---- 4q. 使用手册 ----
+        // 手册是构建时由 HELP.md 转成 HTML 打进 .app 的。
+        // 转换在构建脚本里做，失败会被 echo 成警告 —— 不验证的话，
+        // 用户点了"使用手册"只会看到一个空白窗口。
+        log("")
+        log("[4q] 使用手册")
+        if let helpURL = Bundle.main.url(forResource: "Help", withExtension: "html") {
+            check("手册已打包进应用", true, helpURL.lastPathComponent)
+            if let html = try? String(contentsOf: helpURL, encoding: .utf8) {
+                check("手册内容非空", html.count > 8000, "\(html.count) 字符")
+                check("是完整 HTML 文档",
+                      html.contains("<!DOCTYPE html>") && html.contains("</html>"),
+                      "首尾标签齐全")
+                check("标题与目录锚点已生成",
+                      html.contains("<h1") && html.contains("id=\"疑难解答\""),
+                      "含 h1 与疑难解答锚点")
+                check("表格已转换", html.contains("<table>"), "含表格")
+                check("代码块已转换", html.contains("<pre><code>"), "含代码块")
+                check("标签配平（table）",
+                      html.components(separatedBy: "<table>").count == html.components(separatedBy: "</table>").count,
+                      "开闭数量一致")
+                // 未解析的 Markdown 残留检查：标题行不该原样出现
+                check("没有残留的 Markdown 标题行",
+                      !html.contains("\n## ") && !html.contains("\n### "),
+                      "无残留")
+            } else {
+                check("能读取手册内容", false)
+            }
+        } else {
+            check("手册已打包进应用", false, "Bundle 里找不到 Help.html")
+        }
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

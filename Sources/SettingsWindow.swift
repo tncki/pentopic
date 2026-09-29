@@ -368,6 +368,15 @@ struct SettingsView: View {
             Text(LS("Lizenz: MIT", "Licence: MIT", "许可证：MIT", "授權條款：MIT"))
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
+            Button {
+                HelpWindowController.shared.show()
+            } label: {
+                Label(LS("Benutzerhandbuch", "User manual", "使用手册", "使用手冊"),
+                      systemImage: "book")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.link)
+            .padding(.top, 2)
             Text(LS("""
             Unabhängige macOS-Anwendung für Bildschirm-Annotationen.
             Inspiriert von \(Brand.upstreamName) 1.8 von \(Brand.upstreamAuthor) — ohne Verbindung zum Original.\n              Veröffentlichung mit freundlicher Genehmigung des Originalautors (29.09.2026).

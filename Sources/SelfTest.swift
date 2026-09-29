@@ -1321,6 +1321,10 @@ enum SelfTest {
         func visibleWindows() -> Int {
             sc.overlayWindowsForTest.filter { $0.isVisible }.count
         }
+        // 归位：自检从终端启动，不是前台应用，别的 App 的激活事件
+        // 可能已经把冻结层收起来了（那正是被测的行为）。
+        // 不先复位的话，本节第一项断言会随环境随机失败。
+        sc.resumeAfterAppSwitch(); pump(0.25)
         check("切走前冻结层可见", visibleWindows() > 0, "\(visibleWindows()) 个可见")
 
         sc.suspendForAppSwitch(); pump(0.25)

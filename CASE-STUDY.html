@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>用 AI 造一个 macOS 应用 · 案例复盘</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfd; --fg: #1d1d1f; --muted: #6e6e73; --card: #fff;
+    --line: #d2d2d7; --accent: #0a7; --accent2: #06c;
+    --warn: #c60; --bad: #c33; --good: #0a7;
+    --code-bg: #f0f0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131315; --fg: #f2f2f4; --muted: #9a9aa0; --card: #1c1c1f;
+      --line: #38383d; --code-bg: #232327;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.75 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 24px 120px; }
+
+  header { margin-bottom: 8px; }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+  h1 { font-size: 40px; line-height: 1.2; margin: 10px 0 14px; letter-spacing: -.02em; }
+  .lede { font-size: 19px; color: var(--muted); margin: 0 0 8px; }
+
+  h2 { font-size: 25px; margin: 56px 0 16px; letter-spacing: -.01em; }
+  h3 { font-size: 18px; margin: 32px 0 10px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent2); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em;
+    background: var(--code-bg); padding: 2px 6px; border-radius: 5px;
+  }
+  hr { border: none; border-top: 1px solid var(--line); margin: 52px 0; }
+
+  /* 数字卡片 */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 28px 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .stat .n { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
+  .stat .l { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  /* 时间线 */
+  .tl { border-left: 2px solid var(--line); margin: 24px 0 24px 8px; padding-left: 24px; }
+  .tl-item { position: relative; margin-bottom: 26px; }
+  .tl-item::before {
+    content: ""; position: absolute; left: -31px; top: 8px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--bg); border: 3px solid var(--accent);
+  }
+  .tl-item.bad::before { border-color: var(--bad); }
+  .tl-date { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+  .tl-title { font-weight: 600; margin: 2px 0 4px; }
+  .tl-body { color: var(--muted); font-size: 15px; }
+
+  /* 案例卡片 */
+  .case {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 22px 24px; margin: 18px 0;
+    border-left: 4px solid var(--line);
+  }
+  .case.arch { border-left-color: var(--bad); }
+  .case.api  { border-left-color: var(--warn); }
+  .case.disc { border-left-color: var(--accent2); }
+  .case.test { border-left-color: #86f; }
+  .case h3 { margin: 0 0 4px; font-size: 17px; }
+  .tag {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+    padding: 2px 8px; border-radius: 5px; margin-bottom: 10px;
+    background: var(--code-bg); color: var(--muted); text-transform: uppercase;
+  }
+  .case dl { margin: 12px 0 0; }
+  .case dt { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .05em; margin-top: 12px; }
+  .case dd { margin: 4px 0 0; }
+  .case .lesson {
+    margin-top: 16px; padding: 12px 16px; border-radius: 9px;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-left: 3px solid var(--accent); font-size: 15px;
+  }
+  .case .lesson b { color: var(--accent); }
+
+  /* 柱状 */
+  .bars { margin: 22px 0; }
+  .bar { display: flex; align-items: center; gap: 12px; margin: 9px 0; font-size: 14px; }
+  .bar .name { width: 150px; flex: none; color: var(--muted); }
+  .bar .track { flex: 1; height: 22px; background: var(--code-bg); border-radius: 5px; overflow: hidden; }
+  .bar .fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 5px; }
+  .bar .v { width: 54px; flex: none; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* 对照表 */
+  table { border-collapse: collapse; width: 100%; margin: 20px 0; font-size: 15px; }
+  th, td { border: 1px solid var(--line); padding: 10px 13px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); font-size: 13px; letter-spacing: .03em; }
+
+  .quote {
+    margin: 22px 0; padding: 16px 20px; border-left: 4px solid var(--accent2);
+    background: color-mix(in srgb, var(--accent2) 8%, transparent);
+    border-radius: 0 10px 10px 0; font-size: 16px;
+  }
+  .quote p { margin: 0; }
+
+  footer { margin-top: 72px; padding-top: 24px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  .kbd { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--code-bg);
+         border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">案例复盘 · 2026 年 9 月</div>
+  <h1>用 AI 造一个 macOS 应用</h1>
+  <p class="lede">10 天，从「复刻一个 Windows 老软件」到一个经原作者许可、在 GitHub 公开发布的开源项目 —— 以及这一路上 AI 犯过的错。</p>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="n">10</div><div class="l">天（9/20 → 9/29）</div></div>
+  <div class="stat"><div class="n">41</div><div class="l">次提交</div></div>
+  <div class="stat"><div class="n">9,501</div><div class="l">行 Swift · 零依赖</div></div>
+  <div class="stat"><div class="n">237</div><div class="l">项自检（从 45 起）</div></div>
+  <div class="stat"><div class="n">23</div><div class="l">个工具 · 4 种语言</div></div>
+  <div class="stat"><div class="n">2.5<span style="font-size:17px">MB</span></div><div class="l">应用体积</div></div>
+</div>
+
+<h2>一、做了什么</h2>
+
+<p><strong>PentoPic</strong> 是一个 macOS 屏幕标注工具：按一下热键，屏幕冻结成画板，直接在画面上用画笔、箭头、图形、文字、打码、聚焦讲解，然后保存或分享。</p>
+
+<p>起点是一句需求：「把 <code>pointofix.de</code> 复刻成 mac 版本的软件」。终点不只是复刻 —— 发布版本有 23 个工具（原版 16 个），并拿到了原作者的书面许可。</p>
+
+<table>
+  <tr><th>维度</th><th>结果</th></tr>
+  <tr><td>仓库</td><td><a href="https://github.com/tncki/pentopic">github.com/tncki/pentopic</a> · MIT · Public</td></tr>
+  <tr><td>发布</td><td><a href="https://github.com/tncki/pentopic/releases/tag/v1.0.0">v1.0.0</a> · 通用二进制（Intel + Apple Silicon）· 1.4 MB</td></tr>
+  <tr><td>技术</td><td>纯 Swift + AppKit / SwiftUI / ScreenCaptureKit，<strong>零第三方依赖</strong></td></tr>
+  <tr><td>构建</td><td>只用 Command Line Tools，不需要完整 Xcode</td></tr>
+  <tr><td>授权</td><td>Pointofix 著作权人书面表示不反对发布（存档于仓库）</td></tr>
+</table>
+
+<h2>二、人和 AI 各自做了什么</h2>
+
+<p>这份分工不是事先设计的，是十天后回看总结出来的。它可能是这个案例里最有参考价值的部分。</p>
+
+<table>
+  <tr><th></th><th>人</th><th>AI</th></tr>
+  <tr>
+    <td><strong>需求</strong></td>
+    <td>全部。包括原版行为对齐、以及后期 6 项功能扩展的取舍</td>
+    <td>把需求翻译成可执行的技术方案，列出选项与代价</td>
+  </tr>
+  <tr>
+    <td><strong>交互设计</strong></td>
+    <td><strong>关键决策全部来自人</strong>：主工具 + 修饰键临时借用的模型、打码要真读底图、撤销要覆盖全部编辑</td>
+    <td>实现，并在实现中暴露边界情况</td>
+  </tr>
+  <tr>
+    <td><strong>测试</strong></td>
+    <td><strong>11 个真实缺陷全部由人实机发现</strong>。这是价值最高的输入</td>
+    <td>237 项自动化自检，覆盖像素级、状态机、导出格式</td>
+  </tr>
+  <tr>
+    <td><strong>构建与验证</strong></td>
+    <td>决定发布节奏、签名方案、是否公证</td>
+    <td>写构建脚本、跑验证、打包、核对产物校验和</td>
+  </tr>
+  <tr>
+    <td><strong>文档</strong></td>
+    <td>校对措辞（尤其对外的授权邮件）</td>
+    <td>撰写，含使用手册、变更日志、发布说明、许可存档</td>
+  </tr>
+</table>
+
+<div class="quote">
+  <p><strong>一个稳定的模式：人负责「做什么和为什么」，AI 负责「怎么做」，而人继续用实机测试来验收。</strong>AI 自己写的测试，无法替代人上手用一遍 —— 下面第二节的案例会反复证明这一点。</p>
+</div>
+
+<h2>三、六个真实案例</h2>
+
+<p>下面每一条都真实发生过，按<strong>性质</strong>分类。它们的价值不在于"AI 出错了"，而在于<strong>这些错误有固定的类型</strong> —— 认出来，就能提前防住。</p>
+
+<h3 style="color:var(--bad)">类型 A · 架构性缺陷</h3>
+<p style="color:var(--muted);font-size:15px;margin-top:-4px">代码"看起来对"，局部逻辑也没错，错的是数据模型或假设。</p>
+
+<div class="case arch">
+  <span class="tag">架构</span>
+  <h3>「删除之后，撤销就不管用了」</h3>
+  <dl>
+    <dt>现象</dt>
+    <dd>选中几条笔画删除，按 <span class="kbd">⌘Z</span> 没反应 —— 而且更糟：撤销会把<em>别的</em>笔画弹掉。</dd>
+    <dt>根因</dt>
+    <dd>撤销栈<strong>就是笔画数组本身</strong>，撤销实现是 <code>strokes.removeLast()</code>。这只表示「追加」一种操作。而删除改的是数组<strong>中间</strong>。</dd>
+    <dt>影响面</dt>
+    <dd>不光是删除 —— 对齐、移动、组合、层级<strong>全都不可撤销</strong>，因为它们改的都是中间元素。用户只是先撞上删除。</dd>
+    <dt>修法</dt>
+    <dd>改成<strong>快照式撤销</strong>：每次修改前存整份笔画。拖动这类连续操作只在<em>开始时</em>记一次。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b>当撤销/重做建立在"操作是追加"的假设上时，任何"修改已有数据"的功能都会悄悄失去撤销能力。<strong>先问数据结构能不能表示所有操作，再写功能。</strong></div>
+</div>
+
+<div class="case arch">
+  <span class="tag">架构</span>
+  <h3>「选择框切了工具还赖在屏幕上」</h3>
+  <dl>
+    <dt>根因</dt>
+    <dd>选择框<strong>无条件绘制</strong>，完全不看当前是哪个工具。</dd>
+    <dt>连带发现</dt>
+    <dd>排查时发现 <code>selectedCount</code> 用的是 <code>selection.count</code> —— 统计的是 <strong>id 数量</strong>，不是实际存在的笔画。撤销后留下悬空引用，计数虚高，删除会对着不存在的对象操作。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b>一个视觉 bug 常常牵出一个状态管理 bug。<strong>修表面的同时，问一句"这个状态还有谁在用、用得对不对"。</strong></div>
+</div>
+
+<h3 style="color:var(--warn)">类型 B · API 陷阱</h3>
+<p style="color:var(--muted);font-size:15px;margin-top:-4px">文档不会告诉你，推导也推不出来，只有渲染出来看一眼才会发现。</p>
+
+<div class="case api">
+  <span class="tag">API</span>
+  <h3>「序号数字不在圆的中心」</h3>
+  <dl>
+    <dt>现象</dt>
+    <dd>序号标在圆里偏下，直径越大越明显，160pt 时数字直接溢出圆外。</dd>
+    <dt>根因（两层）</dt>
+    <dd>
+      ① 基线定位公式 <code>center.y + height/2 - minY</code> 我当时以为等价于包围盒中点 <code>midY</code> —— <strong>代数上不等价</strong>，它把基线压到了圆心下方约 28pt。<br>
+      ② 更隐蔽的：我用的 <code>.useOpticalBounds</code> <strong>返回的根本不是墨迹包围盒</strong>，而是整个行盒（含升降部、完整前进宽度）。正确的是 <code>.useGlyphPathBounds</code>。
+    </dd>
+    <dt>怎么发现的</dt>
+    <dd>把序号渲染成 PNG 用眼睛看 —— <strong>一眼就看出偏下</strong>。纸面推导在两个环节上都是"对的"。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b>几何/排版类代码<strong>不要靠推导验收</strong>。渲染出来看，或者写像素级断言。我最初写的测试用「红色像素包围盒」定位圆形，把整个采样框都算进去了，<strong>给出了一个假通过的 0.0 偏差</strong>。</div>
+</div>
+
+<div class="case api">
+  <span class="tag">API</span>
+  <h3>两行代码，一个崩溃一个发暗</h3>
+  <dl>
+    <dt><code>NSColor.whiteComponent</code></dt>
+    <dd>对不兼容的色彩空间<strong>抛异常</strong>（不是返回默认值）。我的测试直接崩了。必须先 <code>usingColorSpace(.sRGB)</code>。</dd>
+    <dt><code>CIGaussianBlur</code></dt>
+    <dd>不先 <code>.clampedToExtent()</code> 就裁回原尺寸，<strong>边缘采样不到内容会发暗</strong> —— 打码区四周出现一圈灰边。这是该 API 最经典的坑。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b>Objective-C 时代的 API 用异常而非返回值报错。涉及色彩空间、索引、范围时，<strong>假设它会抛</strong>。</div>
+</div>
+
+<h3 style="color:var(--accent2)">类型 C · 可发现性</h3>
+<p style="color:var(--muted);font-size:15px;margin-top:-4px">功能存在，但用户用不到 —— 等于不存在。</p>
+
+<div class="case disc">
+  <span class="tag">可发现性</span>
+  <h3>「建议加一个能移动笔画的指针工具」</h3>
+  <dl>
+    <dt>背景</dt>
+    <dd>用户提了这条建议。而<strong>那个工具上一轮刚做完</strong> —— 只是它在工具栏里<strong>根本没有按钮</strong>。</dd>
+    <dt>根因</dt>
+    <dd>一次字符串替换<strong>静默失败</strong>，导致 <code>toolRows</code> 里少了那一行。没有编译错误，没有测试失败。工具只能靠快捷键 <span class="kbd">V</span> 调用。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b><strong>用户"重新发明"一个已有功能，是可发现性失败的铁证。</strong>补了一个覆盖性测试：工具栏必须包含全部 23 个工具，且指针排在最前。这条测试如果早就在，那次失败会立刻暴露。</div>
+</div>
+
+<div class="case disc">
+  <span class="tag">可发现性</span>
+  <h3>「鼠标无法移动工具栏」</h3>
+  <dl>
+    <dt>根因</dt>
+    <dd>拖动区<strong>确实存在</strong>（探测视图层级：66×18），但 SwiftUI 的 <code>Text</code> <strong>默认是命中目标</strong>，盖住了它。整个标题栏只剩 <code>Spacer</code> 那 <strong>约 9px 的空隙</strong>能按到 —— 跟不能拖没区别。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b>「控件存在」不等于「可操作」。<strong>验证交互时要量可点击区域，而不是确认控件在层级里。</strong></div>
+</div>
+
+<h3 style="color:#86f">类型 D · AI 自身的失误</h3>
+<p style="color:var(--muted);font-size:15px;margin-top:-4px">这一类最值得单独说，因为它不是能力问题，而是<strong>流程问题</strong>。</p>
+
+<div class="case test">
+  <span class="tag">AI 失误</span>
+  <h3>编造了一个不存在的原作者姓名</h3>
+  <dl>
+    <dt>经过</dt>
+    <dd>我在文档里写了原作者是「Dipl.-Ing. Sven Frotscher」。<strong>这个名字是我编的</strong> —— 网站全站爬取后证明不存在，唯一匹配是 "Svenska"（瑞典语）这个词。</dd>
+    <dt>怎么发现的</dt>
+    <dd>用户要求核对，我去逐页抓取验证，才确认是虚构。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b>AI 会<strong>流畅地编造看起来合理的事实</strong>，而且它自己毫无察觉。<strong>凡是可核查的事实（人名、版本号、API 存在性、许可证），都必须落到可验证的来源。</strong>这条在对外沟通里尤其致命 —— 当时的授权邮件正准备发出去。</div>
+</div>
+
+<div class="case test">
+  <span class="tag">AI 失误</span>
+  <h3>诊断工具自己出错，把我带偏了一整轮</h3>
+  <dl>
+    <dt>背景</dt>
+    <dd>CI 构建失败，但 Actions 日志需要管理员权限才能下载。于是我让流水线把错误行作为 annotation 发出来 —— 那是公开 API 能读到的。</dd>
+    <dt>失误</dt>
+    <dd>我的过滤模式包含 <code>error</code>，<strong>匹配到了警告文本里的 "this is an error in the Swift 6 language mode"</strong>。于是<em>警告看起来像编译错误</em>。</dd>
+    <dt>后果</dt>
+    <dd>我照着这些"错误"去清理 Swift 6 并发问题，加了一批 <code>@MainActor</code>，<strong>结果把原本正常的常规构建搞坏了</strong>。收手、撤销、改用严格模式重新取证据后才发现：本地<strong>真正的编译错误是 0 个</strong>。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b><strong>诊断工具本身也需要被怀疑。</strong>当我根据"工具的输出"去做大范围改动时，先花一步验证<em>这个输出是什么意思</em> —— 用严格模式重新匹配一次，代价是 1 分钟，而误判的代价是整轮返工。</div>
+</div>
+
+<div class="case test">
+  <span class="tag">AI 失误</span>
+  <h3>改默认值时忘了设置是持久化的</h3>
+  <dl>
+    <dt>经过</dt>
+    <dd>把「打开会话时的默认工具」从"指针"改成"画笔"。但<strong>上一版已经把旧默认值写进了 UserDefaults</strong> —— 不改就完全不起作用。表现是「我改了代码，行为却没变」。</dd>
+    <dt>修法</dt>
+    <dd>加一次性迁移：识别出"这是旧默认值而非用户主动选择"，丢弃它；迁移之后用户的选择仍然被保留。</dd>
+  </dl>
+  <div class="lesson"><b>教训：</b><strong>任何持久化的默认值一旦发布，就等于承诺。</strong>改默认值之前先想：老用户读到的是什么？需要迁移吗？</div>
+</div>
+
+<hr>
+
+<h2>四、测试是怎么长起来的</h2>
+
+<div class="bars">
+  <div class="bar"><span class="name">起步</span><span class="track"><span class="fill" style="width:19%"></span></span><span class="v">45</span></div>
+  <div class="bar"><span class="name">P0 功能后</span><span class="track"><span class="fill" style="width:24%"></span></span><span class="v">58</span></div>
+  <div class="bar"><span class="name">界面自定义后</span><span class="track"><span class="fill" style="width:34%"></span></span><span class="v">82</span></div>
+  <div class="bar"><span class="name">P1 功能后</span><span class="track"><span class="fill" style="width:42%"></span></span><span class="v">101</span></div>
+  <div class="bar"><span class="name">编辑与撤销后</span><span class="track"><span class="fill" style="width:85%"></span></span><span class="v">203</span></div>
+  <div class="bar"><span class="name">发布版</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="v">237</span></div>
+</div>
+
+<p>数量本身不重要。真正起作用的是<strong>测试的写法</strong> —— 下面这五条都是踩坑之后总结出来的：</p>
+
+<table>
+  <tr><th>原则</th><th>为什么</th><th>具体做法</th></tr>
+  <tr>
+    <td><strong>测试必须能失败</strong></td>
+    <td>一个不会失败的测试等于没有测试</td>
+    <td>断言前先确认"前提成立"。比如验证浮窗被收起前，先断言"收起前确实有浮窗"</td>
+  </tr>
+  <tr>
+    <td><strong>用差分，配对照组</strong></td>
+    <td>只看"变化了"分不清是功能生效还是随机重绘</td>
+    <td>切换工具后画面变了 222 像素；<em>两个都不带选择的工具之间切换必须 0 像素变化</em></td>
+  </tr>
+  <tr>
+    <td><strong>验证身份，不只是数量</strong></td>
+    <td>数量对不代表恢复对了</td>
+    <td>删中间那条再撤销，断言恢复的<strong>就是它</strong>（坐标 500），而不是"数量变成 3"</td>
+  </tr>
+  <tr>
+    <td><strong>底图必须确定性</strong></td>
+    <td>依赖真实屏幕的测试会随机波动，让人误以为偶发</td>
+    <td>打码测试改成合成棋盘图 —— 同一台机器上原本会跑出 0.93 和 4.21 两种结果</td>
+  </tr>
+  <tr>
+    <td><strong>构建产物也要验</strong></td>
+    <td>构建脚本里的转换失败可能只是一行警告</td>
+    <td>使用手册是构建时生成的 —— 自检直接检查<em>打包后的 HTML</em>，而不只是源码</td>
+  </tr>
+</table>
+
+<h2>五、时间线</h2>
+
+<div class="tl">
+  <div class="tl-item">
+    <div class="tl-date">9 月 20 日</div>
+    <div class="tl-title">核心复刻</div>
+    <div class="tl-body">冻结屏幕、16 个标注工具、四语界面、多显示器。自检 45 项。</div>
+  </div>
+  <div class="tl-item bad">
+    <div class="tl-date">9 月 20 — 21 日</div>
+    <div class="tl-title">用户的实机测试开始产生价值</div>
+    <div class="tl-body">权限弹窗死循环、设置窗口关闭闪退、文件夹选择器被压在窗口后面 —— 全部由人上手发现，AI 的自动化测试一个都没覆盖到。</div>
+  </div>
+  <div class="tl-item">
+    <div class="tl-date">9 月 21 日</div>
+    <div class="tl-title">签名方案：自签名证书</div>
+    <div class="tl-body">ad-hoc 签名会把屏幕录制授权绑到 cdhash，<strong>每次重编译都失效</strong>。改用自签名证书后指定要求里不再有 cdhash，授权得以跨编译保留。</div>
+  </div>
+  <div class="tl-item">
+    <div class="tl-date">9 月 22 — 24 日</div>
+    <div class="tl-title">P0 / P1 / P2 功能扩展</div>
+    <div class="tl-body">打码、聚焦、序号、重做 → 标尺、延时捕捉、窗口捕捉、裁剪、PDF/GIF/TIFF → 捕捉历史、水印、旋转、选择与排列。自检 58 → 203 项。</div>
+  </div>
+  <div class="tl-item bad">
+    <div class="tl-date">贯穿全程</div>
+    <div class="tl-title">11 个用户报告的缺陷</div>
+    <div class="tl-body">其中 3 个是架构性的（撤销模型、选择框、窗口钳制），3 个是 API 陷阱，2 个是可发现性失败，1 个是 AI 自身失误。每一个都补了防回归测试。</div>
+  </div>
+  <div class="tl-item">
+    <div class="tl-date">9 月 29 日</div>
+    <div class="tl-title">授权 → 发布</div>
+    <div class="tl-body">原作者书面许可（措辞是 „keine Einwände" —— 不反对，不是背书）。发布前扫描全部 233 个历史版本，清除个人信息后重写历史。打标签，CI 构建通用二进制，发布 v1.0.0。</div>
+  </div>
+  <div class="tl-item bad">
+    <div class="tl-date">9 月 29 日 · 发布卡点</div>
+    <div class="tl-title">CI 构建失败，而我读不到日志</div>
+    <div class="tl-body">Actions 日志需管理员权限。绕道 annotation → 过滤器出错 → 被误导一整轮 → 收紧过滤器 → 真实原因只有一个：<code>Task.detached</code> 里修改捕获变量（Swift 6 是错误，Swift 5 只是警告，而本地默认 Swift 5）。</div>
+  </div>
+</div>
+
+<h2>六、可复用的做法</h2>
+
+<h3>1. 让 AI 写提交信息，而且要写「为什么」</h3>
+<p>41 次提交，信息普遍长这样：</p>
+<div class="quote">
+  <p>「撤销栈就是笔画数组本身，<code>removeLast()</code> 只能表示追加。删除改的是数组中间，所以撤销会弹掉另一条笔画 —— 删除因此完全不可撤销。」</p>
+</div>
+<p>这类信息在三个月后比代码本身更有价值。<strong>让 AI 把它的推理过程写进提交信息</strong>，是这个流程里性价比最高的一条。</p>
+
+<h3>2. 每次修复都补一条防回归测试</h3>
+<p>不是"修完就算"，而是"修完并锁死"。上面 11 个缺陷，每一个都留下了对应的断言。到发布时，<strong>237 项自检里相当一部分是历史缺陷的墓碑</strong>。</p>
+
+<h3>3. 人能上手做的事，不要让 AI 代替判断</h3>
+<p>11 个缺陷全部来自人的实机使用，AI 的自检一个都没提前发现。原因不神秘：AI 写的测试，<strong>测的是它自己理解的规格</strong>。规格理解错了，测试再全也测不出来。</p>
+
+<h3>4. 对外沟通的每一句都要落到事实</h3>
+<p>授权邮件里关于仓库可见性、署名方式、是否已发布的措辞，都被逐字核对过。<strong>AI 起草 + 人校准措辞</strong> 是对外文本的稳妥组合 —— 它写得快，但"有没有说过头"必须人来判断。</p>
+
+<h3>5. 发布前扫描全部历史，不只是当前文件</h3>
+<p>我从当前文件里删掉了个人邮箱，但<strong>三个历史版本仍有它</strong>。仓库公开意味着<em>全部历史</em>公开。<strong>扫描工具要覆盖 <code>git rev-list --objects --all</code> 的每个 blob，而不是 <code>git grep</code> 当前树。</strong></p>
+
+<hr>
+
+<h2>七、这套方法的边界</h2>
+
+<p>需要说清楚几件事，否则这个案例会被误读：</p>
+
+<table>
+  <tr><th>它适合</th><th>它不适合</th></tr>
+  <tr>
+    <td>规格相对明确、可本地验证的工具类软件</td>
+    <td>需求本身还在探索、连"好不好"都难以判断的产品</td>
+  </tr>
+  <tr>
+    <td>有自动化测试兜底、能快速迭代的场景</td>
+    <td>错了代价极高、无法回滚的领域（资金、医疗、生产环境）</td>
+  </tr>
+  <tr>
+    <td>人能上手实测、并且愿意实测</td>
+    <td>没有验证条件，只能"相信它写对了"</td>
+  </tr>
+</table>
+
+<p><strong>这个项目里 AI 产出的代码质量，很大程度上取决于用户愿意花多少时间实测和追问。</strong> 那 11 个缺陷、那些"重新发明已有功能"的建议 —— 每一次追问都直接把项目往正确方向推了一步。</p>
+
+<div class="quote">
+  <p><strong>最有效的用法不是"让 AI 写代码"，而是"让 AI 写代码，然后你认真用它"。</strong></p>
+</div>
+
+<footer>
+  <p>PentoPic 1.0.0 · MIT License · © 2026 Zhao Bin</p>
+  <p>实现由 Zhao Bin 与一个 AI 编码代理协作完成：需求、交互设计、实机测试与全部发布决策由 Zhao Bin 负责。<br>
+  源码与许可存档：<a href="https://github.com/tncki/pentopic">github.com/tncki/pentopic</a></p>
+</footer>
+
+</div>
+</body>
+</html>

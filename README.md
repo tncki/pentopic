@@ -30,7 +30,8 @@
 📖 **[`HELP.md`](HELP.md) 使用手册** —— 安装、工具详解、进阶用法、疑难解答、快捷键总表。
 应用内也有：**设置 › 关于 › 使用手册**（构建时转成 HTML 打包，离线可读）。
 
-📘 [`CASE-STUDY.html`](CASE-STUDY.html) **用 AI 造这个应用的案例复盘** —— 分工、六个真实案例、测试方法论、可复用做法。
+🖼 [`CASE-STUDY-VISUAL.html`](CASE-STUDY-VISUAL.html) **图文版案例** —— 界面截图 + 架构示意图 + 测试增长曲线
+📘 [`CASE-STUDY.html`](CASE-STUDY.html) **文字版案例复盘** —— 分工、六个真实案例、测试方法论、可复用做法。
 
 📄 [`CHANGELOG.md`](CHANGELOG.md) 版本变更 · [`NOTICE.md`](NOTICE.md) 署名与权利 ·
 [`AUTHORIZATION.md`](AUTHORIZATION.md) 原作者许可存档 · [`ROADMAP.md`](ROADMAP.md) 功能规划

@@ -32,8 +32,14 @@ swiftc -sdk "$SDK" -target "$TARGET" -swift-version 5 -O -module-name POFPreview
   "$ROOT"/Sources/Core.swift "$ROOT"/Sources/Prefs.swift "$ROOT"/Sources/Capture.swift \
   "$ROOT"/Sources/CanvasView.swift "$ROOT"/Sources/Windows.swift "$ROOT"/Sources/Toolbar.swift \
   "$ROOT"/Sources/Exporter.swift "$ROOT"/Sources/SettingsWindow.swift "$ROOT"/Sources/HotKey.swift \
-  "$ROOT"/Sources/Decorator.swift "$ROOT"/Sources/History.swift \
+  "$ROOT"/Sources/Decorator.swift "$ROOT"/Sources/History.swift "$ROOT"/Sources/HelpWindow.swift \
   "$ROOT"/Tools/preview/main.swift
+
+# ---- 源指纹：记录这批预览图是按哪一版源码渲染的 --------------------------
+# 出现过的真实问题：改了 app.conf 里的署名，重新构建了应用，却忘了重新渲染预览图 ——
+# 于是仓库里的图长期显示旧署名。渲染产物是构建输出，源码变了它就该跟着变。
+HASH=$(cat "$ROOT/app.conf" "$ROOT"/Sources/*.swift | shasum -a 256 | awk '{print $1}')
+echo "$HASH" > "$ROOT/preview/.source-hash"
 
 # ---- 最小 Info.plist，让 Brand.name 取到真实产品名 -------------------------
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST

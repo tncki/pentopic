@@ -29,6 +29,11 @@ jobs:
       - name: 校验手册能生成
         run: python3 Tools/md2html.py HELP.md > /dev/null
 
+      # 改了源码却忘了重新渲染预览图 —— 仓库里的图会长期显示旧内容。
+      # 这个检查比对源指纹，比"重新渲染再 diff"稳（后者受字体与 SDK 影响）。
+      - name: 预览图是否为最新
+        run: ./Tools/check-previews.sh
+
       - name: 本地化完整性检查
         run: python3 Tools/check-l10n.py
 

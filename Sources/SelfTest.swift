@@ -84,9 +84,33 @@ enum SelfTest {
     // MARK: 渲染证据
 
     @discardableResult
+    /// 崩溃时把原因和堆栈打出来。
+    /// 开发沙箱读不到 ~/Library/Logs/DiagnosticReports，没有这个就只能靠猜。
+    static func installCrashDiagnostics() {
+        NSSetUncaughtExceptionHandler { ex in
+            let msg = "\n=== UNCAUGHT EXCEPTION ===\n\(ex.name.rawValue): \(ex.reason ?? "?")\n"
+                + ex.callStackSymbols.joined(separator: "\n") + "\n"
+            FileHandle.standardError.write(msg.data(using: .utf8)!)
+        }
+        for sig in [SIGTRAP, SIGABRT, SIGSEGV, SIGBUS, SIGILL] {
+            signal(sig) { s in
+                let bt = Thread.callStackSymbols.joined(separator: "\n")
+                let msg = "\n=== SIGNAL \(s) ===\n\(bt)\n"
+                FileHandle.standardError.write(msg.data(using: .utf8)!)
+                exit(128 + s)
+            }
+        }
+    }
+
     private static func shot(_ view: NSView?, _ name: String) -> Bool {
         guard let v = view, v.bounds.width > 0, v.bounds.height > 0 else {
             log("  (无法渲染 \(name)：视图为空)"); return false
+        }
+        // 隐藏窗口上做 cacheDisplay 会让 AppKit 抛异常。
+        // 正常情况下不该发生；但一旦会话卡在挂起态，渲染证据就会把测试整个带崩，
+        // 掩盖掉真正要看的失败项。
+        if let w = v.window, !w.isVisible {
+            log("  (跳过渲染 \(name)：所在窗口不可见)"); return false
         }
         v.layoutSubtreeIfNeeded()
         v.displayIfNeeded()
@@ -152,6 +176,7 @@ enum SelfTest {
     // MARK: 主流程
 
     static func run() {
+        installCrashDiagnostics()
         try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         log("================ Pointofix macOS 真机端到端自检 ================")
         log("时间: \(Date())")
@@ -589,12 +614,30 @@ enum SelfTest {
         log("")
         log("[4f] 聚焦不累积 / ESC 取消拖动")
 
-        // 聚焦：先后框两处，非聚焦区的亮度不应一次比一次暗
+        // 聚焦：先后框两处，非聚焦区的亮度不应一次比一次暗。
+        // 探测点**动态找一个够亮的像素** —— 压暗黑色看不出任何变化，
+        // 早先写死坐标，遇到屏幕上那块是黑的就无端失败。
         sc.clearAll(); sc.setBackground(.currentScreen); pump(0.25)
-        let spotProbe = CGPoint(x: 1300, y: 850)      // 两次聚焦区之外
+        var spotProbe = CGPoint(x: 1300, y: 850)
+        if let base = st.composeCG() {
+            outer: for y in stride(from: 120, to: Int(st.pointSize.height) - 120, by: 17) {
+                for x in stride(from: 120, to: Int(st.pointSize.width) - 120, by: 17) {
+                    guard let c = PixelSampler.color(of: base, at: CGPoint(x: CGFloat(x) * st.scale, y: CGFloat(y) * st.scale))?
+                                       .usingColorSpace(.sRGB) else { continue }
+                    // 够亮、且两个聚焦区都框不到它
+                    if c.redComponent > 0.6, c.greenComponent > 0.6, c.blueComponent > 0.6,
+                       !(x > 80 && x < 950 && y > 80 && y < 700) {
+                        spotProbe = CGPoint(x: CGFloat(x), y: CGFloat(y))
+                        break outer
+                    }
+                }
+            }
+        }
+        log(String(format: "  探测点 (%.0f, %.0f)", spotProbe.x, spotProbe.y))
         func probeColor() -> String? {
             guard let cg = st.composeCG() else { return nil }
-            return PixelSampler.color(of: cg, at: CGPoint(x: spotProbe.x * st.scale, y: spotProbe.y * st.scale))?.hexString
+            return PixelSampler.color(of: cg, at: CGPoint(x: spotProbe.x * st.scale,
+                                                          y: spotProbe.y * st.scale))?.hexString
         }
         let original = probeColor()
         sc.setTool(.spotlight)
@@ -1301,6 +1344,32 @@ enum SelfTest {
             drag([CGPoint(x: 1000, y: 600), CGPoint(x: 1060, y: 640)]); pump(0.15)
             return st.strokes.count == strokesBeforeSwitch + 1
         }(), "\(st.strokes.count)")
+
+        // 走**真实的 NSWorkspace 通知**（而不是直接调方法）——
+        // 用户遇到的是这条路径上的闪退，直接调方法测不出来。
+        if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+            NSWorkspace.shared.notificationCenter.post(
+                name: NSWorkspace.didActivateApplicationNotification, object: nil,
+                userInfo: [NSWorkspace.applicationUserInfoKey: finder])
+            pump(0.3)
+            check("真实通知：切到 Finder 后挂起", sc.hiddenForAppSwitch && visibleWindows() == 0,
+                  "hidden=\(sc.hiddenForAppSwitch) 可见窗口 \(visibleWindows())")
+            check("切走后 App 仍在 ⌘Tab 列表里（activationPolicy == .regular）",
+                  NSApp.activationPolicy() == .regular,
+                  "\(NSApp.activationPolicy().rawValue)")
+
+            NSWorkspace.shared.notificationCenter.post(
+                name: NSWorkspace.didActivateApplicationNotification, object: nil,
+                userInfo: [NSWorkspace.applicationUserInfoKey: NSRunningApplication.current])
+            pump(0.4)
+            check("真实通知：回到本 App 后恢复", !sc.hiddenForAppSwitch && visibleWindows() > 0,
+                  "hidden=\(sc.hiddenForAppSwitch) 可见窗口 \(visibleWindows())")
+            check("真实通知：恢复后会话仍在、笔画完整",
+                  sc.isActive && st.strokes.count == strokesBeforeSwitch + 1,
+                  "\(st.strokes.count) 条")
+        } else {
+            check("能找到 Finder 用于通知测试", false)
+        }
 
         // 直接调恢复（模拟 App 重新激活）
         sc.suspendForAppSwitch(); pump(0.2)

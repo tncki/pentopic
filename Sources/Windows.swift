@@ -425,6 +425,7 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     /// 因为切到别的 App 而临时收起（会话本身还在，标注一条都不会丢）
     private(set) var hiddenForAppSwitch = false
+    private var previousActivationPolicy: NSApplication.ActivationPolicy?
     private var previousApp: NSRunningApplication?
 
     private(set) var tool: ToolKind = .pen
@@ -580,6 +581,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         keyWindow.makeKeyAndOrderFront(nil)
         if let v = views.first(where: { $0.state === activeCanvas }) { keyWindow.makeFirstResponder(v) }
 
+        enterSessionActivation()
         showToolbar()
         magnifier = MagnifierPanel()
         toast = ToastPanel()
@@ -624,6 +626,7 @@ final class SessionController: NSObject, NSMenuDelegate {
 
         isActive = false
         hiddenForAppSwitch = false
+        leaveSessionActivation()
         model.isActive = false
         dismissFloatingPanels()
         teardownWindows()
@@ -1120,6 +1123,24 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     // MARK: 切换 App（⌘Tab）
 
+    /// 会话期间把 App 切到 `.regular`。
+    ///
+    /// `.accessory`（常驻状态栏、无 Dock 图标）的 App **不出现在 ⌘Tab 列表里** ——
+    /// 用户 ⌘Tab 切走了就再也没法用 ⌘Tab 切回来，只能去点状态栏图标。
+    /// 会话期间临时变成 `.regular`，Dock 和 ⌘Tab 都能找到它，
+    /// 切回来时 `didBecomeActive` 自然会触发恢复。
+    private func enterSessionActivation() {
+        previousActivationPolicy = NSApp.activationPolicy()
+        if previousActivationPolicy != .regular { NSApp.setActivationPolicy(.regular) }
+    }
+
+    /// 会话结束恢复常驻状态栏的形态
+    private func leaveSessionActivation() {
+        let back = previousActivationPolicy ?? .accessory
+        if NSApp.activationPolicy() != back { NSApp.setActivationPolicy(back) }
+        previousActivationPolicy = nil
+    }
+
     /// 会话期间切到别的 App 时把冻结层收起来。
     ///
     /// 冻结遮罩在 `screenSaver` 层级，盖住一切 —— 不收起的话，用户 ⌘Tab 过去了
@@ -1138,21 +1159,29 @@ final class SessionController: NSObject, NSMenuDelegate {
         if let f = toolbarPanel?.frame.origin { Prefs.setToolbarOrigin(f) }
     }
 
-    /// 回到标注：把收起的窗口重新摆出来
+    /// 回到标注。
+    ///
+    /// 窗口重排**同步**做（状态立刻一致、可预测）；
+    /// 只有 `NSApp.activate` 延后一拍 —— 本方法会被**菜单动作**（状态栏菜单还在跟踪）
+    /// 和 **App 激活通知回调**调用，在这些时刻同步激活会撞进 AppKit 正在处理的
+    /// 激活流程里。
     func resumeAfterAppSwitch() {
         guard isActive, hiddenForAppSwitch else { return }
         hiddenForAppSwitch = false
-        NSApp.activate(ignoringOtherApps: true)
-        for w in windows { w.orderFrontRegardless() }
+        for w in windows where !w.isVisible { w.orderFrontRegardless() }
         toolbarPanel?.orderFrontRegardless()
         if tool == .magnifier, let st = activeCanvas,
            let v = views.first(where: { $0.state === st }), v.hasMousePoint {
             if magnifier == nil { magnifier = MagnifierPanel() }
             magnifier?.update(canvas: st, at: v.mousePointValue, penSize: penSize)
         }
-        views.first(where: { $0.state === activeCanvas })?.window?.makeFirstResponder(
-            views.first(where: { $0.state === activeCanvas }))
+        if let v = views.first(where: { $0.state === activeCanvas }), let w = v.window, w.isVisible {
+            w.makeFirstResponder(v)
+        }
         syncModel()
+        DispatchQueue.main.async {
+            if !NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+        }
         flashStatus(LS("Zurück zur Anmerkung", "Back to annotating", "已返回标注", "已返回標註"))
     }
 

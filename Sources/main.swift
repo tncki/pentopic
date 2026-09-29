@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         L.lang = Prefs.resolveLanguage()
         NSApp.setActivationPolicy(.accessory)
 
+        installAppSwitchObserver()
+
         // 标记文件触发：权限探测 / 真实启动路径下的完整自检
         if let req = SelfTest.markerRequest {
             if req.mode == "selftest" {
@@ -42,20 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         GlobalHotKey.shared.onFire = { SessionController.shared.toggle() }
         GlobalHotKey.shared.registerCurrent()
 
-        // 会话期间允许 ⌘Tab 切走：别的 App 被激活时收起冻结层，
-        // 否则切过去了却仍然只看到冻结画面，表现得像 ⌘Tab 没反应。
-        // 回到本 App（点菜单栏图标 / 按热键）时再摆回来。
-        NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil, queue: .main) { note in
-            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            else { return }
-            if app.bundleIdentifier == Bundle.main.bundleIdentifier {
-                SessionController.shared.resumeAfterAppSwitch()
-            } else {
-                SessionController.shared.suspendForAppSwitch()
-            }
-        }
+
 
         if Prefs.autoOpen {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -66,6 +55,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+
+    /// 会话期间允许 ⌘Tab 切走：别的 App 被激活时收起冻结层，
+    /// 否则切过去了却仍然只看到冻结画面，表现得像 ⌘Tab 没反应。
+    /// 回到本 App（点菜单栏图标 / 按热键）时再摆回来。
+    ///
+    /// 必须早于自检的提前 return —— 否则自检路径下这个监听根本不存在，
+    /// 那条路径就永远测不到。
+    private func installAppSwitchObserver() {
+        let myPID = ProcessInfo.processInfo.processIdentifier
+
+        // 用 PID 判断"是不是自己"。早先用 bundleIdentifier 比较，
+        // 但直接启动的进程（不是经 LaunchServices）拿到的 bundleIdentifier 可能是 nil，
+        // 于是"切回来了"这个分支永远不成立 —— 表现为切走后回不来。
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main) { note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            else { return }
+            if app.processIdentifier == myPID {
+                SessionController.shared.resumeAfterAppSwitch()
+            } else {
+                SessionController.shared.suspendForAppSwitch()
+            }
+        }
+
+        // 另一条更直接的钩子：本 App 自己被激活。
+        // 它不依赖 NSWorkspace 的通知时序，两条路谁先到都能恢复。
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil, queue: .main) { _ in
+            SessionController.shared.resumeAfterAppSwitch()
+        }
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         if let f = SessionController.shared.toolbarPanelFrame() { Prefs.setToolbarOrigin(f.origin) }

@@ -12,11 +12,6 @@ jobs:
     runs-on: macos-14
     steps:
 
-      - name: 手册转换器自检
-        run: python3 Tools/md2html.py --selftest
-
-      - name: 校验手册能生成
-        run: python3 Tools/md2html.py HELP.md > /dev/null
       - uses: actions/checkout@v4
 
       - name: 环境信息
@@ -25,6 +20,14 @@ jobs:
           swift --version
           echo "--- app.conf 里的产品身份 ---"
           grep -E '^(APP_NAME|BUNDLE_ID|VERSION)=' app.conf || true
+
+      # 手册工具的自检要放在 checkout 之后 —— 之前插到了 checkout 前，
+      # 那时 Tools/ 还不存在，两步都白白失败。
+      - name: 手册转换器自检
+        run: python3 Tools/md2html.py --selftest
+
+      - name: 校验手册能生成
+        run: python3 Tools/md2html.py HELP.md > /dev/null
 
       - name: 本地化完整性检查
         run: python3 Tools/check-l10n.py

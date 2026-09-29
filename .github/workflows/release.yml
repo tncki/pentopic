@@ -24,8 +24,45 @@ jobs:
           echo "name=$APP_NAME"     >> "$GITHUB_OUTPUT"
           echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
 
+      - name: 环境信息
+        run: |
+          {
+            echo "| 项目 | 值 |"
+            echo "|---|---|"
+            echo "| 系统 | $(sw_vers -productVersion) ($(uname -m)) |"
+            echo "| Swift | $(swift --version 2>&1 | head -1) |"
+            echo "| SDK | $(xcrun --show-sdk-path 2>&1) |"
+            echo "| python3 | $(python3 --version 2>&1) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 构建失败时把日志写进步骤摘要 —— 摘要对未认证访客可见，
+      # 而 Actions 日志需要仓库管理员权限才能下载。
       - name: 构建（通用二进制）
-        run: ./build.sh --universal
+        run: |
+          set -o pipefail
+          if ./build.sh --universal 2>&1 | tee /tmp/build.log; then
+            exit 0
+          fi
+          {
+            echo "## ❌ 构建失败"
+            echo '```'
+            # 编译器报错在开头，库错误在结尾，两头都留
+            head -60 /tmp/build.log
+            echo "…（中略）…"
+            tail -60 /tmp/build.log
+            echo '```'
+            echo "### 关键行"
+            echo '```'
+            grep -nE "error:|错误|!!|fatal|cannot|No such" /tmp/build.log | head -30
+            echo '```'
+            echo "| 项目 | 值 |"
+            echo "|---|---|"
+            echo "| 系统 | $(sw_vers -productVersion) ($(uname -m)) |"
+            echo "| Swift | $(swift --version 2>&1 | head -1) |"
+            echo "| SDK | $(xcrun --show-sdk-path 2>&1) |"
+            echo "| python3 | $(python3 --version 2>&1) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       - name: 打包 zip（zip 能保留 .app 的符号链接与权限）
         run: |

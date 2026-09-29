@@ -38,15 +38,16 @@ jobs:
           if ./build.sh --universal 2>&1 | tee /tmp/build.log; then
             exit 0
           fi
-          # Actions 日志需要仓库管理员权限才能下载，annotation 通过公开 API 可读。
-          # 构建失败时把关键行作为 annotation 发出来。
+          # 只匹配真正的编译错误。早先用宽泛的 "error" 匹配，
+          # 结果把警告文本里的 "this is an error in the Swift 6 language mode"
+          # 也当成了错误，白白排查了半天。
           if [ -f /tmp/build.log ]; then
-            grep -nE "error:|错误|!!|fatal|No such|cannot find|not found|Undefined|unable" /tmp/build.log \
-              | head -6 | cut -c1-600 | while IFS= read -r l; do
+            grep -nE "\.swift:[0-9]+:[0-9]+: error:|^error:|fatal error:|No such file|command not found|Permission denied|!! " \
+              /tmp/build.log | head -8 | cut -c1-500 | while IFS= read -r l; do
                 echo "::error title=构建错误::${l//$'\n'/ }"
               done
-            tail -3 /tmp/build.log | cut -c1-600 | while IFS= read -r l; do
-              echo "::error title=日志尾部::${l//$'\n'/ }"
+            tail -25 /tmp/build.log | cut -c1-500 | while IFS= read -r l; do
+              [ -n "$l" ] && echo "::error title=日志尾部::${l//$'\n'/ }"
             done
           fi
           exit 1

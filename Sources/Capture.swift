@@ -58,7 +58,7 @@ enum ScreenCapture {
                                                    scale: CGFloat) -> CGImage? {
         guard #available(macOS 14.0, *) else { return nil }
         let sem = DispatchSemaphore(value: 0)
-        var out: CGImage?
+        let box = Box<CGImage>()
 
         Task.detached(priority: .userInitiated) {
             do {
@@ -80,15 +80,15 @@ enum ScreenCapture {
                 cfg.ignoreShadowsDisplay = true
                 let img = try await SCScreenshotManager.captureImage(contentFilter: filter,
                                                                      configuration: cfg)
-                out = img
+                box.set(img)
             } catch {
-                out = nil
+                box.set(nil)
             }
             sem.signal()
         }
 
         _ = sem.wait(timeout: .now() + 10)
-        return out
+        return box.get()
     }
 
     static func nsImage(from c: CapturedScreen) -> NSImage {
@@ -96,6 +96,22 @@ enum ScreenCapture {
     }
 }
 
+
+/// 跨并发域传递结果的容器。
+///
+/// 这些函数是"同步外壳 + 异步内核"：用信号量等 `Task.detached` 的结果。
+/// 直接在 `Task` 里改外层的 `var`，在 Swift 6 的严格并发检查下是**编译错误**；
+/// 本地 Command Line Tools 默认仍是 Swift 5 语言模式，只给警告 ——
+/// 所以这个问题直到 GitHub Actions（Swift 6）上才暴露，本地一直是"过"的。
+///
+/// `@unchecked Sendable` 是有意的：读写都由内部锁保护，不需要编译器再插一层。
+private final class Box<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: T?
+    init() {}
+    func set(_ v: T?) { lock.lock(); value = v; lock.unlock() }
+    func get() -> T? { lock.lock(); defer { lock.unlock() }; return value }
+}
 
 // MARK: - 窗口捕捉
 
@@ -141,7 +157,7 @@ extension ScreenCapture {
     static func captureWindow(id: CGWindowID, scale: CGFloat) -> CGImage? {
         guard #available(macOS 14.0, *) else { return nil }
         let sem = DispatchSemaphore(value: 0)
-        var out: CGImage?
+        let box = Box<CGImage>()
         Task.detached(priority: .userInitiated) {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false,
@@ -156,12 +172,12 @@ extension ScreenCapture {
                 cfg.showsCursor = false
                 cfg.ignoreShadowsSingleWindow = true
                 cfg.captureResolution = .best
-                out = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg)
-            } catch { out = nil }
+                box.set(try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg))
+            } catch { box.set(nil) }
             sem.signal()
         }
         _ = sem.wait(timeout: .now() + 10)
-        return out
+        return box.get()
     }
 }
 

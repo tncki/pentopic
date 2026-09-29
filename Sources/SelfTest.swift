@@ -1215,6 +1215,56 @@ enum SelfTest {
         sc.clearAll(); pump(0.15)
         sc.setTool(.pen); sc.setSwatch(0)
 
+        // ---- 4o. 工具栏拖动区 ----
+        // 用户报"鼠标无法移动工具栏"。先确认拖动区是否真的存在于视图层级里、尺寸是否正常。
+        log("")
+        log("[4o] 工具栏拖动区")
+        if let panel = sc.toolbarPanelForTest, let content = panel.contentView {
+            var found: [NSRect] = []
+            func walk(_ v: NSView) {
+                if let d = v as? DragView { found.append(d.frame) }
+                for sub in v.subviews { walk(sub) }
+            }
+            walk(content)
+            check("拖动区存在于视图层级中", !found.isEmpty, "\(found.count) 个")
+            if let f = found.first {
+                log(String(format: "  拖动区 frame = (%.0f, %.0f, %.0f×%.0f)  面板 %.0f×%.0f",
+                           f.minX, f.minY, f.width, f.height, panel.frame.width, panel.frame.height))
+                check("拖动区尺寸可用（宽>40 高>=14）", f.width > 40 && f.height >= 14,
+                      String(format: "%.0f×%.0f", f.width, f.height))
+            }
+            // 面板是否完整落在屏幕内
+            let scr = NSScreen.main ?? NSScreen.screens[0]
+            let p = panel.frame
+            let fully = scr.frame.contains(p)
+            check("工具栏完整落在屏幕内（否则顶部拖动柄可能够不到）", fully,
+                  String(format: "面板 y %.0f…%.0f，屏幕 y %.0f…%.0f",
+                         p.minY, p.maxY, scr.frame.minY, scr.frame.maxY))
+        } else {
+            check("能找到工具栏面板", false)
+        }
+
+        // 钳制逻辑本身：部分露出屏幕时**必须**被拉回来（早先只判断"完全不相交"）
+        let scr2 = NSScreen.main ?? NSScreen.screens[0]
+        let vis2 = scr2.visibleFrame
+        let partly = NSRect(x: vis2.minX + 20, y: vis2.minY - 15, width: 200, height: 400)
+        let fixed = sc.clampForTest(partly)
+        check("部分露出屏幕的窗口被拉回可见区域",
+              abs(fixed.minY - vis2.minY) < 1, String(format: "y %.0f → %.0f", partly.minY, fixed.minY))
+        check("拉回后完整可见", vis2.contains(fixed),
+              String(format: "%.0f…%.0f vs %.0f…%.0f", fixed.minY, fixed.maxY, vis2.minY, vis2.maxY))
+
+        let offRight = NSRect(x: vis2.maxX + 300, y: vis2.minY + 50, width: 200, height: 300)
+        let fixedR = sc.clampForTest(offRight)
+        check("完全在屏幕右侧之外也被拉回", vis2.contains(fixedR),
+              String(format: "x %.0f → %.0f", offRight.minX, fixedR.minX))
+
+        // 比屏幕还高时：优先保住顶部（拖动柄在那里）
+        let tooTall = NSRect(x: vis2.minX + 50, y: vis2.minY, width: 200, height: vis2.height + 200)
+        let fixedT = sc.clampForTest(tooTall)
+        check("比屏幕还高时保顶部（拖动柄可见）",
+              abs(fixedT.maxY - vis2.maxY) < 1, String(format: "顶部 %.0f vs %.0f", fixedT.maxY, vis2.maxY))
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

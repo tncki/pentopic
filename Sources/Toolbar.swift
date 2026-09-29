@@ -266,8 +266,12 @@ struct ToolbarView: View {
         ZStack {
             WindowDragArea()
             HStack(spacing: 4) {
+                // 标题必须允许点击穿透到下面的拖动区。
+                // SwiftUI 的 Text 默认是命中目标，之前整个标题栏只有
+                // Spacer 那 ~9px 空隙能拖，跟不能拖没区别。
                 Text(Brand.name).font(.system(size: 9.5, weight: .bold)).lineLimit(1)
                     .foregroundColor(Color(.sRGB, red: 0.2, green: 0.3, blue: 0.6, opacity: 1))
+                    .allowsHitTesting(false)
                 Spacer(minLength: 0)
                 Button(action: { controller.finish() }) {
                     Image(systemName: "xmark.circle.fill")

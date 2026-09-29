@@ -688,32 +688,45 @@ final class SessionController: NSObject, NSMenuDelegate {
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isReleasedWhenClosed = false
-        panel.isMovableByWindowBackground = false
+        // 空白处也能拖动整个工具栏。按钮会自己消费点击，只有按钮之间的空隙
+        // 会触发窗口拖动 —— 工具栏这么高，只能从细窄的标题栏拖太不方便。
+        panel.isMovableByWindowBackground = true
         panel.contentView = hosting
         hosting.layoutSubtreeIfNeeded()
         let fit = hosting.fittingSize
         panel.setContentSize(NSSize(width: max(140, fit.width), height: max(200, fit.height)))
 
         let screen = activeCanvas?.screen ?? NSScreen.main ?? NSScreen.screens[0]
-        var origin = Prefs.toolbarOrigin()
-        if origin == nil {
-            origin = NSPoint(x: screen.frame.maxX - panel.frame.width - 24,
-                             y: screen.frame.maxY - panel.frame.height - 60)
-        }
-        if let o = origin {
-            let clamped = clampToScreens(NSRect(origin: o, size: panel.frame.size))
-            panel.setFrameOrigin(clamped.origin)
-        }
+        let desired = Prefs.toolbarOrigin() ?? NSPoint(
+            x: screen.visibleFrame.maxX - panel.frame.width - 24,
+            y: screen.visibleFrame.maxY - panel.frame.height - 60)
+        let clamped = clampToScreens(NSRect(origin: desired, size: panel.frame.size))
+        panel.setFrameOrigin(clamped.origin)
+        Prefs.setToolbarOrigin(clamped.origin)      // 存回钳制后的位置
         panel.orderFrontRegardless()
         toolbarPanel = panel
         hostingView = hosting
     }
 
+    /// 把窗口完整放进某块屏幕的**可见区域**。
+    ///
+    /// 早先只判断"是否和任意屏幕相交"，部分露出屏幕时完全不调整 ——
+    /// 工具栏长出屏幕外时，顶部那块拖动柄就够不到了。
+    /// 用 visibleFrame 而不是 frame：后者包含菜单栏和 Dock。
     private func clampToScreens(_ r: NSRect) -> NSRect {
+        func overlap(_ f: CGRect) -> CGFloat {
+            let i = f.intersection(r)
+            return i.isNull ? 0 : i.width * i.height
+        }
+        let screen = NSScreen.screens.max { overlap($0.frame) < overlap($1.frame) } ?? NSScreen.main
+        guard let s = screen else { return r }
+        let vis = s.visibleFrame
         var rect = r
-        let inside = NSScreen.screens.contains { $0.frame.intersects(rect) }
-        if !inside, let f = NSScreen.screens.first {
-            rect.origin = NSPoint(x: f.frame.maxX - rect.width - 24, y: f.frame.maxY - rect.height - 60)
+        rect.origin.x = min(max(rect.origin.x, vis.minX), max(vis.minX, vis.maxX - rect.width))
+        if rect.height >= vis.height {
+            rect.origin.y = vis.maxY - rect.height      // 比屏幕还高：先保顶部（拖动柄）
+        } else {
+            rect.origin.y = min(max(rect.origin.y, vis.minY), vis.maxY - rect.height)
         }
         return rect
     }
@@ -723,6 +736,10 @@ final class SessionController: NSObject, NSMenuDelegate {
     }
 
     func toolbarPanelFrame() -> NSRect? { toolbarPanel?.frame }
+
+    /// 自检用
+    var toolbarPanelForTest: ToolbarPanel? { toolbarPanel }
+    func clampForTest(_ r: NSRect) -> NSRect { clampToScreens(r) }
 
     func allViews() -> [CanvasView] { views }
 

@@ -18,6 +18,11 @@
 「关于」对话框与 README 已明确声明：本项目是**受 Pointofix 启发的独立实现**，
 不包含原作任何代码与美术资源，与原作无隶属关系。详见 `NOTICE.md`。
 
+> ✅ **已获得原作者书面许可**（2026-09-29，Dr. Daniela Kobbe · Thomas Gottfried EDV）：
+> 许可公开发布，并同意本项目所用的署名方式。原文与存档见 [`AUTHORIZATION.md`](AUTHORIZATION.md)。
+>
+> 注意措辞是 *„keine Einwände"*（**不反对**），**不是**背书或官方合作。
+
 > Bundle ID 用 GitHub 开源惯例 `io.github.<用户名>.<应用名>`，已确认为 **io.github.tncki.pentopic**。
 
 如果想取得原作者的正式许可，`AUTHORIZATION-EMAIL.md` 里有中/德/英三语的邮件草稿。

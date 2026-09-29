@@ -370,25 +370,25 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
             Text(LS("""
             Unabhängige macOS-Anwendung für Bildschirm-Annotationen.
-            Inspiriert von \(Brand.upstreamName) 1.8 von \(Brand.upstreamAuthor) — ohne Verbindung zum Original.
+            Inspiriert von \(Brand.upstreamName) 1.8 von \(Brand.upstreamAuthor) — ohne Verbindung zum Original.\n              Veröffentlichung mit freundlicher Genehmigung des Originalautors (29.09.2026).
             Tastenkürzel: B Stift · E Radierer · G Linie · P Pfeil · D Doppelpfeil · R Rechteck (⇧ gefüllt) ·
             O Ellipse (⇧ gefüllt) · T Text · H Häkchen · K Kreuz · F Bereich · M Lupe · +/− Zoom · F2 Bereich
             eingeben · F9 Start/Fertig · ⌘Z Rückgängig · ⌘C Kopieren · ⌘S Speichern · ⌘P Drucken · ⌘V Einfügen.
             """, """
             Independent macOS screen-annotation app.
-            Inspired by \(Brand.upstreamName) 1.8 by \(Brand.upstreamAuthor) — not affiliated with the original.
+            Inspired by \(Brand.upstreamName) 1.8 by \(Brand.upstreamAuthor) — not affiliated with the original.\n              Published with the original author's permission (2026-09-29).
             Shortcuts: B pen · E eraser · G line · P arrow · D double arrow · R rectangle (⇧ filled) ·
             O ellipse (⇧ filled) · T text · H check · K cross · F region · M magnifier · +/− zoom · F2 enter
             region · F9 start/finish · ⌘Z undo · ⌘C copy · ⌘S save · ⌘P print · ⌘V paste.
             """, """
             独立的 macOS 屏幕标注应用。
-            受 \(Brand.upstreamAuthor) 的 \(Brand.upstreamName) 1.8 启发 —— 与原作无隶属关系。
+            受 \(Brand.upstreamAuthor) 的 \(Brand.upstreamName) 1.8 启发 —— 与原作无隶属关系。\n              经原作者许可发布（2026-09-29）。
             快捷键：B 画笔 · E 橡皮 · G 直线 · P 箭头 · D 双向箭头 · R 矩形（⇧ 实心）· O 椭圆（⇧ 实心）·
             T 文字 · H 对勾 · K 叉号 · F 选区 · M 放大镜 · +/− 缩放 · F2 输入选区坐标 · F9 开始/完成 ·
             ⌘Z 撤销 · ⌘C 复制 · ⌘S 保存 · ⌘P 打印 · ⌘V 粘贴。
             """, """
             獨立的 macOS 螢幕標註應用。
-            受 \(Brand.upstreamAuthor) 的 \(Brand.upstreamName) 1.8 啟發 —— 與原作無隸屬關係。
+            受 \(Brand.upstreamAuthor) 的 \(Brand.upstreamName) 1.8 啟發 —— 與原作無隸屬關係。\n              經原作者許可發布（2026-09-29）。
             快速鍵：B 筆刷 · E 橡皮 · G 直線 · P 箭頭 · D 雙向箭頭 · R 矩形（⇧ 實心）· O 橢圓（⇧ 實心）·
             T 文字 · H 打勾 · K 叉號 · F 選取範圍 · M 放大鏡 · +/− 縮放 · F2 輸入選取範圍座標 · F9 開始/完成 ·
             ⌘Z 復原 · ⌘C 複製 · ⌘S 儲存 · ⌘P 列印 · ⌘V 貼上。

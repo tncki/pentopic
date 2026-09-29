@@ -23,6 +23,9 @@
 >
 > 注意措辞是 *„keine Einwände"*（**不反对**），**不是**背书或官方合作。
 
+📄 [`CHANGELOG.md`](CHANGELOG.md) 版本变更 · [`NOTICE.md`](NOTICE.md) 署名与权利 ·
+[`AUTHORIZATION.md`](AUTHORIZATION.md) 原作者许可存档 · [`ROADMAP.md`](ROADMAP.md) 功能规划
+
 > Bundle ID 用 GitHub 开源惯例 `io.github.<用户名>.<应用名>`，已确认为 **io.github.tncki.pentopic**。
 
 如果想取得原作者的正式许可，`AUTHORIZATION-EMAIL.md` 里有中/德/英三语的邮件草稿。

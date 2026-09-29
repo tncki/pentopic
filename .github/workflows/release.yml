@@ -47,10 +47,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME:-v${{ steps.ident.outputs.version }}}"
-          gh release create "$TAG" \
-            --title "${{ steps.ident.outputs.name }} $TAG" \
-            --generate-notes \
-            "$OUT" build/SHA256SUMS.txt
+          # 手写的发布说明优先；没有才退回从提交自动生成。
+          # 首个版本用自动生成的提交列表对用户没什么价值。
+          if [ -f RELEASE-NOTES.md ]; then
+            gh release create "$TAG" \
+              --title "${{ steps.ident.outputs.name }} $TAG" \
+              --notes-file RELEASE-NOTES.md \
+              "$OUT" build/SHA256SUMS.txt
+          else
+            gh release create "$TAG" \
+              --title "${{ steps.ident.outputs.name }} $TAG" \
+              --generate-notes \
+              "$OUT" build/SHA256SUMS.txt
+          fi
           echo "已发布: $TAG"
 
       # 如果你以后加入了 Apple Developer Program（$99/年），把下面这段打开就能自动公证：

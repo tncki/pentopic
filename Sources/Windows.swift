@@ -426,6 +426,8 @@ final class SessionController: NSObject, NSMenuDelegate {
     /// 因为切到别的 App 而临时收起（会话本身还在，标注一条都不会丢）
     private(set) var hiddenForAppSwitch = false
     private var previousActivationPolicy: NSApplication.ActivationPolicy?
+    /// 自检用：记录会话开始、激活**之前**的激活策略
+    private(set) var policyAtStartForTest: NSApplication.ActivationPolicy?
     private var previousApp: NSRunningApplication?
 
     private(set) var tool: ToolKind = .pen
@@ -465,6 +467,12 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     private func performStart(synchronously: Bool) {
         previousApp = NSWorkspace.shared.frontmostApplication
+        // **必须先切成 .regular，再激活。**
+        // 反过来的话（先以 .accessory 激活、之后才改策略），系统会把本 App
+        // 当成"新注册的 App"追加到 ⌘Tab 列表末尾 —— 用户按一次 ⌘Tab 回不来，
+        // 得一路循环到最后一个才是自己。
+        enterSessionActivation()
+        policyAtStartForTest = NSApp.activationPolicy()
         NSApp.activate(ignoringOtherApps: true)
         isActive = true
         model.isActive = true
@@ -581,7 +589,6 @@ final class SessionController: NSObject, NSMenuDelegate {
         keyWindow.makeKeyAndOrderFront(nil)
         if let v = views.first(where: { $0.state === activeCanvas }) { keyWindow.makeFirstResponder(v) }
 
-        enterSessionActivation()
         showToolbar()
         magnifier = MagnifierPanel()
         toast = ToastPanel()

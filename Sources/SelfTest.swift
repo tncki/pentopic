@@ -1357,6 +1357,9 @@ enum SelfTest {
             check("切走后 App 仍在 ⌘Tab 列表里（activationPolicy == .regular）",
                   NSApp.activationPolicy() == .regular,
                   "\(NSApp.activationPolicy().rawValue)")
+            check("会话一开始就是 .regular（必须早于激活，否则 ⌘Tab 里会排到最后）",
+                  sc.policyAtStartForTest == .regular,
+                  sc.policyAtStartForTest.map { "\($0.rawValue)" } ?? "未记录")
 
             NSWorkspace.shared.notificationCenter.post(
                 name: NSWorkspace.didActivateApplicationNotification, object: nil,

@@ -2,6 +2,8 @@
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private var statusMenu: NSMenu?
+    private let menuToggleTag = 9001
 
     private var startPanel: StartButtonPanel!
     private var statusItem: NSStatusItem?
@@ -40,6 +42,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         GlobalHotKey.shared.onFire = { SessionController.shared.toggle() }
         GlobalHotKey.shared.registerCurrent()
 
+        // 会话期间允许 ⌘Tab 切走：别的 App 被激活时收起冻结层，
+        // 否则切过去了却仍然只看到冻结画面，表现得像 ⌘Tab 没反应。
+        // 回到本 App（点菜单栏图标 / 按热键）时再摆回来。
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil, queue: .main) { note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            else { return }
+            if app.bundleIdentifier == Bundle.main.bundleIdentifier {
+                SessionController.shared.resumeAfterAppSwitch()
+            } else {
+                SessionController.shared.suspendForAppSwitch()
+            }
+        }
+
         if Prefs.autoOpen {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 SessionController.shared.start()
@@ -64,8 +81,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.toolTip = Brand.name
         }
         let menu = NSMenu()
-        menu.addItem(withTitle: LS("Start / Fertig  (F9)", "Start / Finish  (F9)", "开始 / 完成  (F9)", "開始 / 完成  (F9)"),
-                     action: #selector(menuToggle), keyEquivalent: "")
+        // 标题要随状态变（切走之后是"返回标注"），所以展开时动态更新
+        menu.delegate = self
+        statusMenu = menu
+        let toggleItem = NSMenuItem(title: toggleMenuTitle(),
+                                    action: #selector(menuToggle), keyEquivalent: "")
+        toggleItem.target = self
+        toggleItem.tag = menuToggleTag
+        menu.addItem(toggleItem)
         // 窗口列表在菜单展开时才枚举 —— 提前枚举会拿到过期结果
         let windowItem = NSMenuItem(title: LS("Fenster aufnehmen", "Capture window", "捕捉窗口", "捕捉視窗"),
                                     action: nil, keyEquivalent: "")
@@ -105,8 +128,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func menuToggle() { SessionController.shared.toggle() }
 
+    private func toggleMenuTitle() -> String {
+        SessionController.shared.hiddenForAppSwitch
+            ? LS("Zurück zur Anmerkung", "Back to annotating", "返回标注", "返回標註")
+            : LS("Start / Fertig  (F9)", "Start / Finish  (F9)", "开始 / 完成  (F9)", "開始 / 完成  (F9)")
+    }
+
     /// 展开「捕捉窗口」子菜单时才去枚举窗口
     func menuNeedsUpdate(_ menu: NSMenu) {
+        // 主菜单：只更新"开始/返回"那一项的文案
+        if menu === statusMenu {
+            menu.item(withTag: menuToggleTag)?.title = toggleMenuTitle()
+            return
+        }
         menu.removeAllItems()
         let wins = ScreenCapture.windows()
         guard !wins.isEmpty else {

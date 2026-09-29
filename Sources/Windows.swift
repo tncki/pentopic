@@ -422,6 +422,9 @@ final class SessionController: NSObject, NSMenuDelegate {
     private var colorInfo: ColorInfoPanel?
     private var toast: ToastPanel?
     private var startPanel: StartButtonPanel?
+
+    /// 因为切到别的 App 而临时收起（会话本身还在，标注一条都不会丢）
+    private(set) var hiddenForAppSwitch = false
     private var previousApp: NSRunningApplication?
 
     private(set) var tool: ToolKind = .pen
@@ -596,6 +599,8 @@ final class SessionController: NSObject, NSMenuDelegate {
         let now = Date()
         if now.timeIntervalSince(lastToggle) < 0.35 { return }
         lastToggle = now
+        // 切走之后的"回到标注"也应该能被热键唤起，而不是把会话结束掉
+        if hiddenForAppSwitch { resumeAfterAppSwitch(); return }
         if isActive { finish() } else { start() }
     }
 
@@ -618,6 +623,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         }
 
         isActive = false
+        hiddenForAppSwitch = false
         model.isActive = false
         dismissFloatingPanels()
         teardownWindows()
@@ -739,6 +745,7 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     /// 自检用
     var toolbarPanelForTest: ToolbarPanel? { toolbarPanel }
+    var overlayWindowsForTest: [NSWindow] { windows }
     func clampForTest(_ r: NSRect) -> NSRect { clampToScreens(r) }
 
     func allViews() -> [CanvasView] { views }
@@ -1109,6 +1116,44 @@ final class SessionController: NSObject, NSMenuDelegate {
                                                     "Window captured: \(title)",
                                                     "已捕捉窗口：\(title)", "已捕捉視窗：\(title)"))
         }
+    }
+
+    // MARK: 切换 App（⌘Tab）
+
+    /// 会话期间切到别的 App 时把冻结层收起来。
+    ///
+    /// 冻结遮罩在 `screenSaver` 层级，盖住一切 —— 不收起的话，用户 ⌘Tab 过去了
+    /// 却仍然只看到冻结画面，表现得就像 ⌘Tab 没反应。
+    /// 会话本身不动：笔画、撤销栈、选择全都保留。
+    func suspendForAppSwitch() {
+        guard isActive, !hiddenForAppSwitch else { return }
+        hiddenForAppSwitch = true
+        for w in windows { w.orderOut(nil) }
+        toolbarPanel?.orderOut(nil)
+        magnifier?.orderOut(nil)
+        toast?.orderOut(nil)
+        countdown?.orderOut(nil)
+        colorInfo?.orderOut(nil)
+        tooltip?.hide()
+        if let f = toolbarPanel?.frame.origin { Prefs.setToolbarOrigin(f) }
+    }
+
+    /// 回到标注：把收起的窗口重新摆出来
+    func resumeAfterAppSwitch() {
+        guard isActive, hiddenForAppSwitch else { return }
+        hiddenForAppSwitch = false
+        NSApp.activate(ignoringOtherApps: true)
+        for w in windows { w.orderFrontRegardless() }
+        toolbarPanel?.orderFrontRegardless()
+        if tool == .magnifier, let st = activeCanvas,
+           let v = views.first(where: { $0.state === st }), v.hasMousePoint {
+            if magnifier == nil { magnifier = MagnifierPanel() }
+            magnifier?.update(canvas: st, at: v.mousePointValue, penSize: penSize)
+        }
+        views.first(where: { $0.state === activeCanvas })?.window?.makeFirstResponder(
+            views.first(where: { $0.state === activeCanvas }))
+        syncModel()
+        flashStatus(LS("Zurück zur Anmerkung", "Back to annotating", "已返回标注", "已返回標註"))
     }
 
     // MARK: 选择与排列

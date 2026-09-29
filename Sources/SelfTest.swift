@@ -1265,6 +1265,56 @@ enum SelfTest {
         check("比屏幕还高时保顶部（拖动柄可见）",
               abs(fixedT.maxY - vis2.maxY) < 1, String(format: "顶部 %.0f vs %.0f", fixedT.maxY, vis2.maxY))
 
+        // ---- 4p. ⌘Tab 切走与返回 ----
+        log("")
+        log("[4p] 切换 App 时的挂起与恢复")
+        sc.clearAll(); pump(0.15)
+        sc.setTool(.pen); sc.setPenSize(1); sc.setSwatch(1)
+        drag([CGPoint(x: 400, y: 400), CGPoint(x: 520, y: 460)]); pump(0.15)
+        drag([CGPoint(x: 700, y: 500), CGPoint(x: 820, y: 560)]); pump(0.15)
+        let strokesBeforeSwitch = st.strokes.count
+        check("切走前已画两条", strokesBeforeSwitch == 2, "\(strokesBeforeSwitch)")
+
+        func visibleWindows() -> Int {
+            sc.overlayWindowsForTest.filter { $0.isVisible }.count
+        }
+        check("切走前冻结层可见", visibleWindows() > 0, "\(visibleWindows()) 个可见")
+
+        sc.suspendForAppSwitch(); pump(0.25)
+        check("切走后会话仍然进行（没有结束）", sc.isActive)
+        check("切走后标记为已挂起", sc.hiddenForAppSwitch)
+        check("切走后冻结层全部收起", visibleWindows() == 0, "\(visibleWindows()) 个仍可见")
+        check("切走后笔画一条没丢", st.strokes.count == strokesBeforeSwitch, "\(st.strokes.count)")
+        check("切走后撤销栈仍在", st.canUndo)
+
+        // 挂起期间再调一次不应出问题
+        sc.suspendForAppSwitch(); pump(0.1)
+        check("重复挂起是幂等的", visibleWindows() == 0 && sc.hiddenForAppSwitch)
+
+        // 热键/菜单唤醒应当"返回标注"，而不是把会话结束掉
+        sc.toggle(); pump(0.3)
+        check("挂起时 toggle 是返回而不是结束", sc.isActive && !sc.hiddenForAppSwitch)
+        check("返回后冻结层重新可见", visibleWindows() > 0, "\(visibleWindows()) 个可见")
+        check("返回后笔画仍然完整", st.strokes.count == strokesBeforeSwitch, "\(st.strokes.count)")
+        check("返回后仍可继续画", {
+            sc.setTool(.pen)
+            drag([CGPoint(x: 1000, y: 600), CGPoint(x: 1060, y: 640)]); pump(0.15)
+            return st.strokes.count == strokesBeforeSwitch + 1
+        }(), "\(st.strokes.count)")
+
+        // 直接调恢复（模拟 App 重新激活）
+        sc.suspendForAppSwitch(); pump(0.2)
+        sc.resumeAfterAppSwitch(); pump(0.25)
+        check("直接恢复也正常", !sc.hiddenForAppSwitch && visibleWindows() > 0 && sc.isActive)
+        check("恢复后仍能响应鼠标", {
+            sc.setTool(.select)
+            click(CGPoint(x: 430, y: 430)); pump(0.12)
+            return st.selection.count >= 1
+        }(), "\(st.selection.count) 个选中")
+
+        sc.clearAll(); pump(0.15)
+        sc.setTool(.pen); sc.setSwatch(0)
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

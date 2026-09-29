@@ -85,9 +85,13 @@ git clone https://github.com/tncki/pentopic.git && cd pentopic
 
 ## 版本号说明
 
-`1.0.0` 之前没有公开发布过，开发过程中的 34 次提交不单独列为版本。
+`1.0.0` 之前没有公开发布过，开发过程中的提交不单独列为版本。
 从本版本起按语义化版本递增：
 
 - **主版本** —— 不兼容的界面或数据格式变更
 - **次版本** —— 向下兼容的新功能
 - **修订号** —— 向下兼容的问题修复
+
+---
+
+*PentoPic · MIT License · © 2026 Zhao Bin · [github.com/tncki/pentopic](https://github.com/tncki/pentopic)*

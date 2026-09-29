@@ -143,3 +143,5 @@ non-objection, not an endorsement.
 ---
 
 **许可证** MIT · **隐私** 不收集数据、不联网 · **源码** [github.com/tncki/pentopic](https://github.com/tncki/pentopic)
+
+*PentoPic 1.0.0 · © 2026 Zhao Bin*

@@ -7,7 +7,12 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAMP="$ROOT/preview/.source-hash"
-CUR=$(cat "$ROOT/app.conf" "$ROOT"/Sources/*.swift | shasum -a 256 | awk '{print $1}')
+# 只统计**参与预览构建**的源文件 —— 必须与 preview-build.sh 用同一套规则，
+# 否则两边算出的指纹永远对不上。
+#
+# 注意：别把 case 写进 $( … ) 里 —— `;;` 在命令替换中会让 bash 解析失败。
+SRCS=$(ls "$ROOT"/Sources/*.swift | grep -v -E '/(SelfTest|main)\.swift$')
+CUR=$(cat "$ROOT/app.conf" $SRCS | shasum -a 256 | awk '{print $1}')
 
 if [ ! -f "$STAMP" ]; then
     echo "❌ preview/.source-hash 不存在 —— 先运行 ./preview-build.sh" >&2

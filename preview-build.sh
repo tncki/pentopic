@@ -35,12 +35,14 @@ swiftc -sdk "$SDK" -target "$TARGET" -swift-version 5 -O -module-name POFPreview
   "$ROOT"/Sources/Decorator.swift "$ROOT"/Sources/History.swift "$ROOT"/Sources/HelpWindow.swift \
   "$ROOT"/Tools/preview/main.swift
 
-# ---- 源指纹：记录这批预览图是按哪一版源码渲染的 --------------------------
-# 出现过的真实问题：改了 app.conf 里的署名，重新构建了应用，却忘了重新渲染预览图 ——
-# 于是仓库里的图长期显示旧署名。渲染产物是构建输出，源码变了它就该跟着变。
-HASH=$(cat "$ROOT/app.conf" "$ROOT"/Sources/*.swift | shasum -a 256 | awk '{print $1}')
+# 只统计**参与预览构建**的源文件。SelfTest.swift 与 main.swift 不在预览的可执行文件里，
+# 算进来会让"改了测试"也误报"预览图过期"。
+#
+# 注意：别把 case 写进 $( { … } | … ) 里 —— `;;` 在命令替换中会让 bash 解析失败，
+# 而且只有在真正执行到那一行时才报错，`bash -n` 也救不了。
+SRCS=$(ls "$ROOT"/Sources/*.swift | grep -v -E '/(SelfTest|main)\.swift$')
+HASH=$(cat "$ROOT/app.conf" $SRCS | shasum -a 256 | awk '{print $1}')
 echo "$HASH" > "$ROOT/preview/.source-hash"
-
 # ---- 最小 Info.plist，让 Brand.name 取到真实产品名 -------------------------
 cat > "$BUNDLE/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

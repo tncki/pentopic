@@ -1902,6 +1902,22 @@ enum SelfTest {
         Prefs.setScreenshotFolder(savedShot)
         Prefs.setEmailFolder(savedMail)
 
+        // ---- 最后一项：文档里写的自检数字，是不是真的 ----------------------
+        // README 里印着"结果: N 项通过"。加完测试忘了同步它，文档就开始说假话 ——
+        // 而且是最容易被读者当场戳穿的那种。
+        // 不依赖屏幕权限、也不联网；找不到 README（例如应用被拷到别处）就跳过。
+        let repoREADME = Bundle.main.bundleURL
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("README.md")
+        if let md = try? String(contentsOf: repoREADME, encoding: .utf8),
+           let m = md.range(of: #"结果: (\d+) 项通过"#, options: .regularExpression) {
+            // 这一项自身也是一项检查，所以 README 该写的是"跑完之后的"总数 = pass + 1。
+            // 因此本检查必须留在**最后一项**，后面不要再加 check()。
+            let claimed = Int(md[m].filter(\.isNumber)) ?? -1
+            check("README 记录的自检数与实测一致", claimed == pass + 1,
+                  "README 写 \(claimed)，本次总数为 \(pass + 1)")
+        }
+
         log("")
         finishReport()
         exit(fail == 0 ? 0 : 1)

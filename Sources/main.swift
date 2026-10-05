@@ -16,6 +16,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         installAppSwitchObserver()
 
+        // 菜单要先建好，**在自检分支之前**。
+        // 早先 buildMainMenu() 在自检的 return 之后 —— 于是自检下 NSApp.mainMenu 是 nil，
+        // 菜单相关的问题（比如"⌘C 被菜单抢去复制截图"）自检根本看不到。
+        // 菜单快捷键在 keyDown 之前处理，这是极易被忽略的一层，必须纳入覆盖。
+        buildMainMenu()
+
         // 标记文件触发：权限探测 / 真实启动路径下的完整自检
         if let req = SelfTest.markerRequest {
             if req.mode == "selftest" {
@@ -33,7 +39,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        buildMainMenu()
         buildStatusItem()
 
         startPanel = StartButtonPanel { SessionController.shared.start() }
@@ -254,15 +259,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         main.addItem(actionItem)
         let actionMenu = NSMenu(title: LS("Aktionen", "Actions", "操作", "操作"))
         let sc = SessionController.shared
-        func add(_ title: String, _ sel: Selector, _ key: String, _ target: AnyObject) {
+        func add(_ title: String, _ sel: Selector, _ key: String, _ target: AnyObject,
+                 _ mods: NSEvent.ModifierFlags = [.command]) {
             let it = NSMenuItem(title: title, action: sel, keyEquivalent: key)
             it.target = target
+            it.keyEquivalentModifierMask = mods
             actionMenu.addItem(it)
         }
         add(LS("Start / Fertig", "Start / Finish", "开始 / 完成", "開始 / 完成"), #selector(menuToggle), "9", self)
         actionMenu.addItem(.separator())
         add(LS("Rückgängig", "Undo", "撤销", "復原"), #selector(NSObject.menuUndoPublic), "z", sc)
-        add(LS("Kopieren", "Copy", "复制", "複製"), #selector(NSObject.menuCopyPublic), "c", sc)
+        // ⌘C 给"复制光标处的色值" —— 放大面板上就是这么写的，不能又是别的意思。
+        // 复制整张截图改为 ⌘⇧C。
+        add(LS("Farbwert kopieren", "Copy colour value", "复制色值", "複製色值"),
+            #selector(NSObject.menuCopyColourPublic), "c", sc)
+        add(LS("Screenshot kopieren", "Copy screenshot", "复制截图到剪贴板", "複製截圖到剪貼簿"),
+            #selector(NSObject.menuCopyPublic), "c", sc, [.command, .shift])
         add(LS("Speichern unter …", "Save as …", "另存为 …", "另存新檔 …"), #selector(NSObject.menuSavePublic), "s", sc)
         add(LS("Drucken …", "Print …", "打印 …", "列印 …"), #selector(NSObject.menuPrintPublic), "p", sc)
         add(LS("Aus Zwischenablage einfügen", "Paste from clipboard", "从剪贴板粘贴", "從剪貼簿貼上"), #selector(NSObject.menuPastePublic), "v", sc)
@@ -279,6 +291,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 extension NSObject {
     @objc func menuUndoPublic() { SessionController.shared.undo() }
     @objc func menuCopyPublic() { Exporter.copyToClipboard(SessionController.shared.activeCanvas) }
+    @objc func menuCopyColourPublic() {
+        // 光标不在画布上时退回复制截图 —— 菜单项点了必须有事发生
+        if SessionController.shared.copyColourUnderCursor() == nil {
+            Exporter.copyToClipboard(SessionController.shared.activeCanvas)
+        }
+    }
     @objc func menuSavePublic() { Exporter.saveWithPanel(SessionController.shared.activeCanvas, screen: SessionController.shared.activeCanvas?.screen) }
     @objc func menuPrintPublic() { Exporter.print(SessionController.shared.activeCanvas) }
     @objc func menuPastePublic() { SessionController.shared.pasteFromClipboard() }

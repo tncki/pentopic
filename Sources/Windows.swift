@@ -929,6 +929,17 @@ final class SessionController: NSObject, NSMenuDelegate {
         flashStatus(LS("Farbe \(col.hexString) kopiert", "Colour \(col.hexString) copied", "已复制颜色 \(col.hexString)", "已複製顏色 \(col.hexString)"))
     }
 
+    /// 复制光标处的色值。光标不在画布上时返回 nil。
+    /// 菜单项与 keyDown 走同一条路径 —— 两边各写一遍必然会分叉。
+    @discardableResult
+    func copyColourUnderCursor() -> String? {
+        guard let v = views.first(where: { $0.hasMousePoint }), let st = activeCanvas,
+              let hex = v.copyColourUnderCursor(canvas: st) else { return nil }
+        flashStatus(LS("Farbe \(hex) kopiert", "Colour \(hex) copied",
+                       "已复制颜色 \(hex)", "已複製顏色 \(hex)"))
+        return hex
+    }
+
     func flashStatus(_ s: String) {
         if toast == nil { toast = ToastPanel() }
         toast?.show(s)
@@ -1484,14 +1495,19 @@ final class SessionController: NSObject, NSMenuDelegate {
         default: break
         }
 
-        // ⌘C：复制光标处的色值。放大面板上就写着这个提示 ——
-        // 提示里写了快捷键，就必须真的能按。面板现在是常驻的，
-        // 所以不再限定在取色器下：画着线想顺手取个色，不该逼人先切工具。
-        if cmd, event.charactersIgnoringModifiers?.lowercased() == "c", Prefs.loupeEnabled {
-            guard let v = views.first(where: { $0.hasMousePoint }), let st = activeCanvas,
-                  let hex = v.copyColourUnderCursor(canvas: st) else { return false }
-            flashStatus(LS("Farbe \(hex) kopiert", "Colour \(hex) copied",
-                           "已复制颜色 \(hex)", "已複製顏色 \(hex)"))
+        // ⌘C：复制光标处的色值。放大面板上就写着这个提示，就必须真的能按。
+        // 注意：真正生效的是**菜单项**（菜单快捷键在 keyDown 之前处理），
+        // 这里只是菜单不可用时的兜底，两条路径共用同一个方法。
+        if cmd, !event.modifierFlags.contains(.shift),
+           event.charactersIgnoringModifiers?.lowercased() == "c" {
+            if copyColourUnderCursor() != nil { return true }
+            Exporter.copyToClipboard(activeCanvas)      // 光标不在画布上 → 仍复制截图
+            return true
+        }
+        // ⌘⇧C：复制截图到剪贴板（原来占用 ⌘C，让给色值了）
+        if cmd, event.modifierFlags.contains(.shift),
+           event.charactersIgnoringModifiers?.lowercased() == "c" {
+            Exporter.copyToClipboard(activeCanvas)
             return true
         }
 
@@ -1547,9 +1563,12 @@ final class SessionController: NSObject, NSMenuDelegate {
         let m = NSMenu()
         m.autoenablesItems = false
 
-        func add(_ title: String, _ sel: Selector?, _ key: String = "", _ target: AnyObject = SessionController.shared) {
+        func add(_ title: String, _ sel: Selector?, _ key: String = "",
+                 _ target: AnyObject = SessionController.shared,
+                 _ mods: NSEvent.ModifierFlags = [.command]) {
             let it = NSMenuItem(title: title, action: sel, keyEquivalent: key)
             it.target = target
+            it.keyEquivalentModifierMask = mods
             m.addItem(it)
         }
 
@@ -1585,7 +1604,7 @@ final class SessionController: NSObject, NSMenuDelegate {
         rotR.target = self
         m.addItem(rotR)
         m.addItem(.separator())
-        add(LS("Kopieren (⌘C)","Copy (⌘C)","复制到剪贴板 (⌘C)", "複製到剪貼簿 (⌘C)"), #selector(menuCopy), "c")
+        add(LS("Kopieren (⌘⇧C)","Copy (⌘⇧C)","复制到剪贴板 (⌘⇧C)", "複製到剪貼簿 (⌘⇧C)"), #selector(menuCopy), "c", SessionController.shared, [.command, .shift])
         add(LS("Speichern (⌘S)","Save (⌘S)","保存图片 (⌘S)", "儲存圖片 (⌘S)"), #selector(menuSave), "s")
         add(LS("Drucken (⌘P)","Print (⌘P)","打印 (⌘P)", "列印 (⌘P)"), #selector(menuPrint), "p")
         add(LS("Per E-Mail senden (⌘E)","Send by e-mail (⌘E)","邮件发送 (⌘E)", "郵件傳送 (⌘E)"), #selector(menuMail), "e")

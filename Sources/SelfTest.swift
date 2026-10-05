@@ -1724,6 +1724,44 @@ enum SelfTest {
         view.clearHoverForTest()
         sc.setTool(.pen); sc.clearAll(); pump(0.15)
 
+        // ---- 4u. ⌘C 到底归谁 ----
+        // 用户报的 bug：⌘C 复制的是截图而不是色值。
+        // 原因不在 keyDown —— **菜单快捷键在 keyDown 之前处理**，
+        // 主菜单里"复制"那条抢走了 ⌘C。只测 handleKeyDown 永远查不出来。
+        log("")
+        log("[4u] ⌘C 的归属")
+        let menuTitle = LS("Aktionen", "Actions", "操作", "操作")
+        if let main = NSApp.mainMenu,
+           let actionMenu = main.items.compactMap({ $0.submenu }).first(where: { $0.title == menuTitle }) {
+            let plainC = actionMenu.items.first {
+                $0.keyEquivalent.lowercased() == "c" && $0.keyEquivalentModifierMask == [.command]
+            }
+            let shiftC = actionMenu.items.first {
+                $0.keyEquivalent.lowercased() == "c"
+                    && $0.keyEquivalentModifierMask == [.command, .shift]
+            }
+            check("⌘C 绑定到「复制色值」",
+                  plainC?.action == #selector(NSObject.menuCopyColourPublic),
+                  plainC.map { "\($0.title)" } ?? "菜单里没有 ⌘C")
+            check("⌘⇧C 绑定到「复制截图」",
+                  shiftC?.action == #selector(NSObject.menuCopyPublic),
+                  shiftC.map { "\($0.title)" } ?? "菜单里没有 ⌘⇧C")
+            check("没有第二条菜单项抢 ⌘C",
+                  actionMenu.items.filter {
+                      $0.keyEquivalent.lowercased() == "c" && $0.keyEquivalentModifierMask == [.command]
+                  }.count == 1,
+                  "\(actionMenu.items.filter { $0.keyEquivalent.lowercased() == "c" && $0.keyEquivalentModifierMask == [.command] }.count) 条")
+        } else {
+            let main = NSApp.mainMenu
+            log("  主菜单: \(main == nil ? "nil" : "有 \(main!.items.count) 项")")
+            if let main {
+                for it in main.items {
+                    log("    项标题「\(it.title)」子菜单「\(it.submenu?.title ?? "无")」\(it.submenu?.items.count ?? 0) 条")
+                }
+            }
+            check("主菜单可读", false, "找不到「\(menuTitle)」菜单")
+        }
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

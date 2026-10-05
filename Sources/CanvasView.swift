@@ -880,6 +880,8 @@ final class CanvasView: NSView {
                           color: strokeColor, width: w))
         case .select:
             let shift = event.modifierFlags.contains(.shift)
+            // ⌥：强制框选。选区内部默认是"拖动整个选区"，需要在这里面框选笔画时用它。
+            let alt = event.modifierFlags.contains(.option)
             if let hit = state.stroke(at: p) {
                 let ids = state.expandGroup(of: hit)
                 if shift {
@@ -890,6 +892,12 @@ final class CanvasView: NSView {
                 }
                 // 点在已选中的笔画上 → 开始整体拖动
                 if state.selection.contains(hit.id) { selectDragLast = p }
+            } else if !alt, let r = state.region, r.insetBy(dx: -3, dy: -3).contains(p) {
+                // 指针工具在选区内按下 —— 拖动整个选区。
+                // 这是用户明确期待的行为："选择与移动"能移动选区。
+                // 想在选区内部框选笔画时按住 ⌥：否则"在选区里拖动"就只有一个含义。
+                if !shift { state.selection.removeAll() }
+                regionMoveOffset = CGPoint(x: p.x - r.minX, y: p.y - r.minY)
             } else {
                 if !shift { state.selection.removeAll() }
                 marqueeStart = p
@@ -911,12 +919,10 @@ final class CanvasView: NSView {
                 needsDisplay = true
                 return
             }
-            if let r = state.region, r.insetBy(dx: -2, dy: -2).contains(p) {
-                if p.y <= r.minY + 12 {
-                    regionMoveOffset = CGPoint(x: p.x - r.minX, y: p.y - r.minY)
-                } else {
-                    regionMoveOffset = nil
-                }
+            if let r = state.region, r.insetBy(dx: -3, dy: -3).contains(p) {
+                // 整个选区都能拖。早先只允许抓顶部 12pt 的蓝条，中间是**死区** ——
+                // 点了没反应，看起来就像"选区动不了"。
+                regionMoveOffset = CGPoint(x: p.x - r.minX, y: p.y - r.minY)
             } else {
                 regionDragStart = p
                 state.region = nil
@@ -999,6 +1005,12 @@ final class CanvasView: NSView {
                           color: c.currentColor, width: c.penSize)
             needsDisplay = true
         case .select:
+            // 拖动选区（指针工具在选区内按下时）
+            if let off = regionMoveOffset, let r = state.region {
+                state.region = CGRect(x: p.x - off.x, y: p.y - off.y, width: r.width, height: r.height)
+                needsDisplay = true
+                return
+            }
             if let last = selectDragLast {
                 if dragUndoSnapshot == nil { dragUndoSnapshot = state.strokes }
                 state.moveSelection(dx: p.x - last.x, dy: p.y - last.y)
@@ -1089,6 +1101,7 @@ final class CanvasView: NSView {
             if dragDidMove, let snap = dragUndoSnapshot { state.pushUndoSnapshot(snap) }
             dragUndoSnapshot = nil
             dragDidMove = false
+            regionMoveOffset = nil          // 指针工具也可能在拖选区，别留残留状态
             marquee = nil; marqueeStart = nil; selectDragLast = nil
             c.syncModel()
             needsDisplay = true

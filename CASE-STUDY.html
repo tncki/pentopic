@@ -124,7 +124,7 @@
   <div class="stat"><div class="n">10</div><div class="l">天（9/20 → 9/29）</div></div>
   <div class="stat"><div class="n">45</div><div class="l">次提交</div></div>
   <div class="stat"><div class="n">9,501</div><div class="l">行 Swift · 零依赖</div></div>
-  <div class="stat"><div class="n">238</div><div class="l">项自检（从 45 起）</div></div>
+  <div class="stat"><div class="n">243</div><div class="l">项自检（从 45 起）</div></div>
   <div class="stat"><div class="n">23</div><div class="l">个工具 · 4 种语言</div></div>
   <div class="stat"><div class="n">2.5<span style="font-size:17px">MB</span></div><div class="l">应用体积</div></div>
 </div>
@@ -163,7 +163,7 @@
   <tr>
     <td><strong>测试</strong></td>
     <td><strong>11 个真实缺陷全部由人实机发现</strong>。这是价值最高的输入</td>
-    <td>238 项自动化自检，覆盖像素级、状态机、导出格式</td>
+    <td>243 项自动化自检，覆盖像素级、状态机、导出格式</td>
   </tr>
   <tr>
     <td><strong>构建与验证</strong></td>
@@ -324,7 +324,7 @@
   <div class="bar"><span class="name">界面自定义后</span><span class="track"><span class="fill" style="width:34%"></span></span><span class="v">82</span></div>
   <div class="bar"><span class="name">P1 功能后</span><span class="track"><span class="fill" style="width:42%"></span></span><span class="v">101</span></div>
   <div class="bar"><span class="name">编辑与撤销后</span><span class="track"><span class="fill" style="width:85%"></span></span><span class="v">203</span></div>
-  <div class="bar"><span class="name">发布版</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="v">238</span></div>
+  <div class="bar"><span class="name">发布版</span><span class="track"><span class="fill" style="width:100%"></span></span><span class="v">243</span></div>
 </div>
 
 <p>数量本身不重要。真正起作用的是<strong>测试的写法</strong> —— 下面这五条都是踩坑之后总结出来的：</p>
@@ -408,7 +408,7 @@
 <p>这类信息在三个月后比代码本身更有价值。<strong>让 AI 把它的推理过程写进提交信息</strong>，是这个流程里性价比最高的一条。</p>
 
 <h3>2. 每次修复都补一条防回归测试</h3>
-<p>不是"修完就算"，而是"修完并锁死"。上面 11 个缺陷，每一个都留下了对应的断言。到发布时，<strong>238 项自检里相当一部分是历史缺陷的墓碑</strong>。</p>
+<p>不是"修完就算"，而是"修完并锁死"。上面 11 个缺陷，每一个都留下了对应的断言。到发布时，<strong>243 项自检里相当一部分是历史缺陷的墓碑</strong>。</p>
 
 <h3>3. 人能上手做的事，不要让 AI 代替判断</h3>
 <p>11 个缺陷全部来自人的实机使用，AI 的自检一个都没提前发现。原因不神秘：AI 写的测试，<strong>测的是它自己理解的规格</strong>。规格理解错了，测试再全也测不出来。</p>

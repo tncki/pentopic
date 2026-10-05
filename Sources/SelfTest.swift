@@ -1423,6 +1423,70 @@ enum SelfTest {
             check("手册已打包进应用", false, "Bundle 里找不到 Help.html")
         }
 
+        // ---- 4r. 选区能否用鼠标移动 ----
+        // 用户报："鼠标无法移动选区"。两条可能的路径都要验：
+        // ① 选区工具抓住顶部蓝条拖动  ② 指针工具在选区内拖动
+        log("")
+        log("[4r] 移动选区（两条路径）")
+        sc.clearAll(); pump(0.2)
+        sc.setTool(.region); pump(0.1)
+        Prefs.freeRegion = false; Prefs.fixedRegion = ""
+        drag([CGPoint(x: 300, y: 300), CGPoint(x: 700, y: 560)]); pump(0.2)
+        guard let r0 = st.region else { check("选区已建立", false); return }
+        log(String(format: "  初始选区: (%.0f,%.0f) %.0f×%.0f", r0.minX, r0.minY, r0.width, r0.height))
+
+        // ① 选区工具：抓顶部蓝条（设计上只有顶部 12pt 能抓）
+        let grabTop = CGPoint(x: r0.midX, y: r0.minY + 5)
+        drag([grabTop, CGPoint(x: grabTop.x + 80, y: grabTop.y + 40)]); pump(0.2)
+        if let r1 = st.region {
+            let moved = abs(r1.minX - r0.minX) > 4 || abs(r1.minY - r0.minY) > 4
+            check("① 选区工具抓顶部蓝条可移动", moved,
+                  String(format: "(%.0f,%.0f) → (%.0f,%.0f)", r0.minX, r0.minY, r1.minX, r1.minY))
+        } else { check("① 选区仍在", false) }
+
+        // ② 选区工具：抓「中部」——逻辑上只允许顶部 12pt，这里预期不动
+        guard let r2 = st.region else { return }
+        let grabMid = CGPoint(x: r2.midX, y: r2.midY)
+        drag([grabMid, CGPoint(x: grabMid.x + 90, y: grabMid.y)]); pump(0.2)
+        if let r3 = st.region {
+            let moved = abs(r3.minX - r2.minX) > 4 || abs(r3.minY - r2.minY) > 4
+            log(String(format: "  选区工具抓中部: %@", moved ? "移动了" : "没动"))
+            check("① 选区工具抓中部：记录当前行为", true, moved ? "会移动" : "不移动（只有顶部 12pt 可抓）")
+        }
+
+        // ③ 指针工具：在选区内拖动
+        guard let r4 = st.region else { return }
+        sc.setTool(.select); pump(0.15)
+        let grabSel = CGPoint(x: r4.midX, y: r4.midY)
+        drag([grabSel, CGPoint(x: grabSel.x + 70, y: grabSel.y + 50)]); pump(0.2)
+        if let r5 = st.region {
+            let moved = abs(r5.minX - r4.minX) > 4 || abs(r5.minY - r4.minY) > 4
+            check("② 指针工具在选区内拖动可以移动选区", moved,
+                  moved ? String(format: "移动了 (%.0f,%.0f)", r5.minX - r4.minX, r5.minY - r4.minY)
+                        : "没动 —— 用户报的正是这条")
+        } else { check("② 选区仍在", false) }
+
+        // ④ ⌥ 逃生通道：在选区内部仍要能框选笔画
+        // 默认"选区内拖动 = 移动选区"会占掉框选，⌥ 把它让回来。
+        guard let r6 = st.region else { return }
+        sc.setTool(.pen); sc.setPenSize(3); sc.setSwatch(1)
+        drag([CGPoint(x: r6.midX - 60, y: r6.midY), CGPoint(x: r6.midX - 10, y: r6.midY + 20)]); pump(0.15)
+        drag([CGPoint(x: r6.midX + 10, y: r6.midY), CGPoint(x: r6.midX + 60, y: r6.midY + 20)]); pump(0.15)
+        sc.setTool(.select); pump(0.15)
+        let regionBeforeAlt = st.region
+        if let down = event(.leftMouseDown, CGPoint(x: r6.midX - 80, y: r6.midY - 40), flags: .option),
+           let mv = event(.leftMouseDragged, CGPoint(x: r6.midX + 80, y: r6.midY + 40), flags: .option),
+           let up = event(.leftMouseUp, CGPoint(x: r6.midX + 80, y: r6.midY + 40), flags: .option) {
+            view.mouseDown(with: down); view.mouseDragged(with: mv); view.mouseUp(with: up)
+        }
+        pump(0.2)
+        check("④ ⌥ + 拖动 = 框选笔画（不会误移选区）",
+              st.region == regionBeforeAlt,
+              st.region == regionBeforeAlt ? "选区未动 ✅" : "选区被移动了 ❌")
+        check("④ ⌥ 框选确实选中了笔画", !st.selection.isEmpty, "\(st.selection.count) 个")
+
+        sc.setTool(.pen); sc.clearAll(); pump(0.15)
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

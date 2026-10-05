@@ -1720,6 +1720,20 @@ enum SelfTest {
         check("失效区确实比面板大", probeInvalid.width > probePanel.width + 20,
               String(format: "面板 %.0f 宽，失效 %.0f 宽", probePanel.width, probeInvalid.width))
 
+        // 关掉之后，屏幕上的残留面板必须被清掉（而不是等下一次别的重绘）
+        Prefs.loupeEnabled = true
+        view.setHoverForTest(loupeProbe); pump(0.2)
+        _ = renderView()
+        let drawnWhenOn = view.loupeDrawnRectForTest
+        Prefs.loupeEnabled = false
+        view.setHoverForTest(CGPoint(x: loupeProbe.x + 40, y: loupeProbe.y + 40)); pump(0.2)
+        _ = renderView()
+        check("开启时记录了面板位置", drawnWhenOn != .zero,
+              String(format: "%.0f×%.0f", drawnWhenOn.width, drawnWhenOn.height))
+        check("关掉后不再认为屏幕上有面板", view.loupeDrawnRectForTest == .zero,
+              String(format: "仍是 %.0f×%.0f", view.loupeDrawnRectForTest.width,
+                     view.loupeDrawnRectForTest.height))
+
         Prefs.loupeEnabled = keepLoupePref
         view.clearHoverForTest()
         sc.setTool(.pen); sc.clearAll(); pump(0.15)

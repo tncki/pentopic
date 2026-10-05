@@ -646,7 +646,7 @@ final class CanvasView: NSView {
             drawSelection(ctx)
             drawRegion(ctx)
             drawHUD()
-            drawEyedropperLoupe(ctx)
+            drawColourLoupe(ctx)
         }
     }
 
@@ -666,6 +666,9 @@ final class CanvasView: NSView {
     /// 否则移走面板时**阴影外圈会留在屏幕上**，就是肉眼看到的残影。
     static let loupeShadowMargin: CGFloat = 22
 
+    /// 自检用：上一次画出的面板矩形（.zero 表示当前没有面板）。
+    var loupeDrawnRectForTest: CGRect { lastLoupeDrawn }
+
     /// 自检用：面板移走时应当失效的区域。必须完整覆盖阴影，否则会留残影。
     func loupeInvalidationRect(for p: CGPoint) -> CGRect {
         loupeRect(for: p).insetBy(dx: -Self.loupeShadowMargin, dy: -Self.loupeShadowMargin)
@@ -684,9 +687,18 @@ final class CanvasView: NSView {
 
     /// 取色/查看用的放大面板。根据设置常驻，不再只服务于取色器 ——
     /// "看不清自己点的是哪个像素"这个问题，在你还没切到取色器时就已经存在了。
-    private func drawEyedropperLoupe(_ ctx: CGContext) {
+    private func drawColourLoupe(_ ctx: CGContext) {
         guard Prefs.loupeEnabled, hasMouse, !state.isZoomed,
-              controller?.tool != .magnifier else { return }   // 放大镜工具有自己的浮窗
+              controller?.tool != .magnifier else {   // 放大镜工具有自己的浮窗
+            // 面板不该画了 —— 但上一次画的那块可能还留在屏幕上（比如刚在设置里关掉），
+            // 这里补一次失效把它擦掉。置零之后不会再触发，不会来回循环。
+            if lastLoupeDrawn != .zero {
+                let r = lastLoupeDrawn.insetBy(dx: -Self.loupeShadowMargin, dy: -Self.loupeShadowMargin)
+                lastLoupeDrawn = .zero
+                DispatchQueue.main.async { [weak self] in self?.setNeedsDisplay(r) }
+            }
+            return
+        }
         guard let full = state.zoomSource() else { return }   // 带缓存，悬停时不会每帧重合成
 
         let w = Self.loupeWidth
@@ -1004,6 +1016,12 @@ final class CanvasView: NSView {
             let pad = Self.loupeShadowMargin
             let now = loupeRect(for: p).insetBy(dx: -pad, dy: -pad)
             setNeedsDisplay(now.union(lastLoupeDrawn))
+        } else if lastLoupeDrawn != .zero {
+            // 面板被关掉（设置里关闭，或切到放大镜工具）→ 必须把上一次画的那块擦掉。
+            // 早先这里直接跳过，残留的面板要等到别的操作触发重绘才消失。
+            setNeedsDisplay(lastLoupeDrawn.insetBy(dx: -Self.loupeShadowMargin,
+                                                   dy: -Self.loupeShadowMargin))
+            lastLoupeDrawn = .zero
         }
         // 选区工具要跟着画尺寸提示
         if state.isZoomed || controller?.tool == .region { needsDisplay = true }
@@ -1168,6 +1186,12 @@ final class CanvasView: NSView {
         let p = pt(event)
         mousePoint = p
         dragCurrent = p
+        // 拖动时面板也要跟着走。各个分支各自设 needsDisplay 很容易漏一条，
+        // 这里统一保证面板的旧位置与新位置都会被重画。
+        if Prefs.loupeEnabled, !state.isZoomed {
+            let pad = Self.loupeShadowMargin
+            setNeedsDisplay(loupeRect(for: p).insetBy(dx: -pad, dy: -pad).union(lastLoupeDrawn))
+        }
         if dragRejected { return }          // 本次拖动已被拒绝，别偷偷把笔画建起来
 
         if state.isZoomed {

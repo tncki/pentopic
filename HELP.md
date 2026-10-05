@@ -2,7 +2,7 @@
 
 > 把屏幕冻结成画板，直接在画面上讲解。
 >
-> 本手册对应 **PentoPic 1.0.0**（macOS 14+）。遇到问题先看[疑难解答](#疑难解答)，
+> 本手册对应 **PentoPic 1.0.1**（macOS 14+）。遇到问题先看[疑难解答](#疑难解答)，
 > 那里覆盖了绝大多数"装了但用不了"的情况。
 
 ---
@@ -44,7 +44,7 @@ PentoPic 是"就地讲解"。讲完即走，不用来回切换应用。
 ### 下载安装
 
 从 [Releases](https://github.com/tncki/pentopic/releases) 下载
-`PentoPic-1.0.0-universal.zip`（Intel + Apple Silicon 通用），
+`PentoPic-1.0.1-universal.zip`（Intel + Apple Silicon 通用），
 解压后把 `PentoPic.app` 拖进「应用程序」。
 
 ### ⚠️ 首次打开需要两步
@@ -565,4 +565,4 @@ xattr -dr com.apple.quarantine /Applications/PentoPic.app
 
 ---
 
-*PentoPic 1.0.0 · MIT License · © 2026 Zhao Bin*
+*PentoPic 1.0.1 · MIT License · © 2026 Zhao Bin*

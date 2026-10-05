@@ -536,8 +536,37 @@ final class CanvasView: NSView {
     private func currentCursor() -> NSCursor {
         guard let c = controller else { return .arrow }
         let tool = c.tool
+
+        // 拖动过程中光标保持不变。否则拖动时指针划过笔画/空白会来回跳，很廉价。
+        if isDragging {
+            switch tool {
+            case .select, .region: return .closedHand
+            case .text: return .iBeam
+            default: return .crosshair
+            }
+        }
+
+        // 指针与选区工具：光标要反映"按下去会发生什么"，而不是固定一个箭头。
+        // ⌥ 会把"移动"变成"框选"，光标也跟着变回十字。
+        let marquee = NSEvent.modifierFlags.contains(.option)
+        if !state.isZoomed, tool == .select || tool == .region {
+            let overRegion = state.region?.insetBy(dx: -3, dy: -3).contains(mousePoint) == true
+            let overStroke = hasMouse && state.stroke(at: mousePoint) != nil
+            if !marquee, overStroke || overRegion {
+                return .openHand                       // 下面有抓得住的东西 → 张开的手
+            }
+            // 指针工具：空白处按下 = 框选已有笔画 → 箭头
+            // 选区工具：空白处按下 = 画一个新选区 → 十字（正在"画"东西，不是"选"）
+            return tool == .region ? .crosshair : .arrow
+        }
+
+        // 缩放视图里只查看，不给工具专属光标（除了取色与放大镜，它们仍是"取用"性质）
         if state.isZoomed {
-            return Prefs.cursorMode == .toolSymbol ? CursorFactory.crosshair() : .crosshair
+            switch tool {
+            case .eyedropper: return CursorFactory.eyedropper()
+            case .magnifier: return CursorFactory.magnifier()
+            default: return Prefs.cursorMode == .toolSymbol ? CursorFactory.crosshair() : .crosshair
+            }
         }
         if Prefs.cursorMode == .toolSymbol {
             switch tool {
@@ -561,14 +590,21 @@ final class CanvasView: NSView {
         case .text: return .iBeam
         case .magnifier: return CursorFactory.magnifier()
         case .eyedropper: return CursorFactory.eyedropper()
-        case .pen, .eraser: return .crosshair
-        default: return .crosshair
+        default: return .crosshair          // 画笔、橡皮、图形、选区、标尺…都是十字
         }
     }
 
     override func cursorUpdate(with event: NSEvent) {
         currentCursor().set()
     }
+
+    // ---- 自检用 -----------------------------------------------------------------
+    /// 按当前状态算出光标。光标是否"符合逻辑"只能靠断言锁住 ——
+    /// 眼睛看一遍很容易，但下次改工具时就忘了同步。
+    var cursorForTest: NSCursor { currentCursor() }
+    /// 自检里模拟"鼠标悬停在某处"，而不必真的合成一个 mouseMoved 事件。
+    func setHoverForTest(_ p: CGPoint) { mousePoint = p; hasMouse = true }
+    func clearHoverForTest() { hasMouse = false }
 
     // MARK: 绘制
 
@@ -588,7 +624,99 @@ final class CanvasView: NSView {
             drawSelection(ctx)
             drawRegion(ctx)
             drawHUD()
+            drawEyedropperLoupe(ctx)
         }
+    }
+
+    /// 取色器悬停时的放大镜。
+    ///
+    /// 取色的难点从来不是"点得准"，而是**看不清自己点的是哪个像素** ——
+    /// 屏幕上相邻两个像素常常只差一点点颜色。所以光标旁边直接给出放大后的
+    /// 像素格、坐标与色值，不用先点一下再看结果。
+    private func drawEyedropperLoupe(_ ctx: CGContext) {
+        guard let c = controller, c.tool == .eyedropper,
+              hasMouse, !isDragging, !state.isZoomed else { return }
+        guard let full = state.zoomSource() else { return }   // 带缓存，悬停时不会每帧重合成
+
+        let cells = 13                       // 放大 13×13 个像素
+        let cell: CGFloat = 11
+        let grid = CGFloat(cells) * cell
+        let pad: CGFloat = 9
+        let infoH: CGFloat = 54
+        let w = grid + pad * 2, h = grid + pad * 2 + infoH
+
+        // 取不到像素（超出画面）就什么都不画，别画一个空面板
+        let px = min(max(Int(mousePoint.x * state.scale), 0), full.width - 1)
+        let py = min(max(Int(mousePoint.y * state.scale), 0), full.height - 1)
+        guard let col = PixelSampler.color(of: full, at: CGPoint(x: px, y: py)) else { return }
+
+        // 默认放在光标右下；贴边时翻到另一侧，免得盖住正在取的那个像素
+        var ox = mousePoint.x + 20, oy = mousePoint.y + 20
+        if ox + w > bounds.maxX - 6 { ox = mousePoint.x - 20 - w }
+        if oy + h > bounds.maxY - 6 { oy = mousePoint.y - 20 - h }
+        ox = max(6, ox); oy = max(6, oy)
+        let panel = CGRect(x: ox, y: oy, width: w, height: h)
+
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+
+        // 面板底
+        let outline = CGPath(roundedRect: panel, cornerWidth: 11, cornerHeight: 11, transform: nil)
+        ctx.setShadow(offset: CGSize(width: 0, height: 2), blur: 12,
+                      color: NSColor.black.withAlphaComponent(0.4).cgColor)
+        ctx.setFillColor(NSColor(srgbRed: 0.10, green: 0.10, blue: 0.11, alpha: 0.97).cgColor)
+        ctx.addPath(outline); ctx.fillPath()
+        ctx.setShadow(offset: .zero, blur: 0, color: nil)
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.16).cgColor)
+        ctx.setLineWidth(1); ctx.addPath(outline); ctx.strokePath()
+
+        // 放大的像素：直接画裁出来的小图并关掉插值 → 得到干净的像素格
+        let gridRect = CGRect(x: panel.minX + pad, y: panel.minY + pad, width: grid, height: grid)
+        let half = cells / 2
+        let src = CGRect(x: px - half, y: py - half, width: cells, height: cells)
+        if let sub = full.cropping(to: src) {
+            ctx.saveGState()
+            ctx.interpolationQuality = .none
+            ctx.translateBy(x: gridRect.minX, y: gridRect.maxY)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(sub, in: CGRect(origin: .zero, size: gridRect.size))
+            ctx.restoreGState()
+
+            // 标出正被取样的那一个像素
+            let cw = grid / CGFloat(cells)
+            let centre = CGRect(x: gridRect.minX + CGFloat(half) * cw,
+                                y: gridRect.minY + CGFloat(half) * cw, width: cw, height: cw)
+            ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.8).cgColor)
+            ctx.setLineWidth(3); ctx.stroke(centre.insetBy(dx: -1, dy: -1))
+            ctx.setStrokeColor(NSColor.white.cgColor)
+            ctx.setLineWidth(1.5); ctx.stroke(centre.insetBy(dx: -0.75, dy: -0.75))
+        }
+
+        // 信息区：色块 + 色值 + 坐标 + 快捷键提示
+        let infoY = gridRect.maxY + 7
+        let swatch = CGRect(x: panel.minX + pad, y: infoY, width: 34, height: 34)
+        ctx.setFillColor(col.cgColor); ctx.fill(swatch)
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.3).cgColor)
+        ctx.setLineWidth(1); ctx.stroke(swatch)
+
+        func text(_ s: String, _ x: CGFloat, _ y: CGFloat, _ size: CGFloat, _ bold: Bool, _ alpha: CGFloat) {
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: bold ? .semibold : .regular),
+                .foregroundColor: NSColor.white.withAlphaComponent(alpha)
+            ]
+            (s as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
+        }
+        let tx = swatch.maxX + 9
+        text(col.hexString, tx, infoY + 1, 14, true, 1.0)
+        let r = Int((col.redComponent * 255).rounded())
+        let g = Int((col.greenComponent * 255).rounded())
+        let b = Int((col.blueComponent * 255).rounded())
+        text("R \(r)  G \(g)  B \(b)", tx, infoY + 19, 11, false, 0.75)
+        text("X \(px)  Y \(py)", panel.minX + pad, infoY + 40, 10.5, false, 0.55)
+        // 缩放后才是屏幕坐标；高倍屏下这个数字才是用户能对上系统取色器的那个
+        text(LS("Klick: übernehmen + kopieren", "Click: pick + copy",
+                "点击：取样并复制色值", "點擊：取樣並複製色值"),
+             tx, infoY + 40, 10.5, false, 0.55)
     }
 
     private func drawZoom(_ ctx: CGContext) {
@@ -788,7 +916,13 @@ final class CanvasView: NSView {
         mousePoint = p
         hasMouse = true
         controller?.canvasMouseMoved(canvas: state, localPoint: p, view: self, event: event)
-        if state.isZoomed || controller?.tool == .region { needsDisplay = true }
+        // 光标要随鼠标**移动**实时变化，不能只在进入视图时设一次 ——
+        // 指针工具划过笔画/选区/空白时，光标得跟着变。
+        currentCursor().set()
+        // 取色器悬停时要画放大镜，所以它也要重绘；选区工具要跟着画尺寸提示。
+        if state.isZoomed || controller?.tool == .region || controller?.tool == .eyedropper {
+            needsDisplay = true
+        }
     }
 
     override func mouseEntered(with event: NSEvent) {

@@ -1487,6 +1487,110 @@ enum SelfTest {
 
         sc.setTool(.pen); sc.clearAll(); pump(0.15)
 
+        // ---- 4s. 光标是否"符合逻辑" ----
+        // 光标是纯视觉的东西，最容易"看一眼觉得对"却在改工具时忘掉同步。
+        log("")
+        log("[4s] 鼠标样式")
+        sc.clearAll(); pump(0.15)
+        st.region = nil
+        func cursorName(_ tool: ToolKind) -> String {
+            sc.setTool(tool); pump(0.1)
+            view.setHoverForTest(CGPoint(x: 60, y: 60))
+            let c = view.cursorForTest
+            view.clearHoverForTest()
+            switch c {
+            case NSCursor.crosshair: return "十字"
+            case NSCursor.arrow: return "箭头"
+            case NSCursor.iBeam: return "文本"
+            case NSCursor.openHand: return "张开的手"
+            case NSCursor.closedHand: return "握紧的手"
+            default: return "专属"
+            }
+        }
+        check("画笔 = 十字", cursorName(.pen) == "十字", cursorName(.pen))
+        check("橡皮 = 十字", cursorName(.eraser) == "十字", cursorName(.eraser))
+        check("文字 = 文本光标", cursorName(.text) == "文本", cursorName(.text))
+        check("选区 = 十字（框选）", cursorName(.region) == "十字", cursorName(.region))
+        check("标尺 = 十字", cursorName(.ruler) == "十字", cursorName(.ruler))
+        check("指针在空白处 = 箭头", cursorName(.select) == "箭头", cursorName(.select))
+        check("取色器 = 专属光标", cursorName(.eyedropper) == "专属", cursorName(.eyedropper))
+
+        // 指针：下方有东西可抓时应变成"手"，这才叫符合逻辑
+        sc.setTool(.pen); sc.setPenSize(10)
+        drag([CGPoint(x: 200, y: 200), CGPoint(x: 400, y: 260)]); pump(0.15)
+        sc.setTool(.select); pump(0.1)
+        view.setHoverForTest(CGPoint(x: 300, y: 230))
+        check("指针悬停在笔画上 = 张开的手", view.cursorForTest == NSCursor.openHand,
+              view.cursorForTest == NSCursor.openHand ? "✅" : "仍是箭头")
+        view.setHoverForTest(CGPoint(x: 700, y: 700))
+        check("指针悬停在空白处 = 箭头", view.cursorForTest == NSCursor.arrow, "")
+        view.clearHoverForTest()
+
+        // 选区上方也一样
+        st.region = CGRect(x: 500, y: 400, width: 200, height: 150)
+        sc.setTool(.select); pump(0.1)
+        view.setHoverForTest(CGPoint(x: 600, y: 475))
+        check("指针悬停在选区上 = 张开的手", view.cursorForTest == NSCursor.openHand, "")
+        sc.setTool(.region); pump(0.1)
+        check("选区工具悬停在选区上 = 张开的手", view.cursorForTest == NSCursor.openHand, "")
+        view.clearHoverForTest()
+        st.region = nil
+
+        // ---- 4t. 取色放大镜 ----
+        // 悬停时应当出现放大面板：位置、色值、快捷键提示都在里面。
+        log("")
+        log("[4t] 取色放大镜")
+        sc.clearAll(); pump(0.15)
+        let loupeProbe = CGPoint(x: 420, y: 360)
+        // 面板默认在光标右下，取一块必定落在面板里的区域
+        let loupeArea = CGRect(x: loupeProbe.x + 30, y: loupeProbe.y + 30, width: 90, height: 90)
+
+        func renderView() -> CGImage? {
+            guard let w = view.window, w.isVisible, view.bounds.width > 0 else { return nil }
+            view.layoutSubtreeIfNeeded(); view.displayIfNeeded()
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            return rep.cgImage
+        }
+        // 按点空间给矩形、按像素空间比较（画布有 scale 倍率）
+        func diffPixels(_ a: CGImage, _ b: CGImage, _ r: CGRect) -> Int {
+            let pr = CGRect(x: r.minX * st.scale, y: r.minY * st.scale,
+                            width: r.width * st.scale, height: r.height * st.scale)
+            var n = 0, y = Int(pr.minY)
+            while y < Int(pr.maxY) {
+                var x = Int(pr.minX)
+                while x < Int(pr.maxX) {
+                    let ca = PixelSampler.color(of: a, at: CGPoint(x: x, y: y))?.usingColorSpace(.sRGB)
+                    let cb = PixelSampler.color(of: b, at: CGPoint(x: x, y: y))?.usingColorSpace(.sRGB)
+                    if ca?.hexString != cb?.hexString { n += 1 }
+                    x += 2
+                }
+                y += 2
+            }
+            return n
+        }
+
+        view.setHoverForTest(loupeProbe)
+        sc.setTool(.pen); pump(0.1); pump(0.3)
+        let without = renderView()
+        sc.setTool(.eyedropper); pump(0.1); pump(0.3)
+        let with = renderView()
+        if let a = without, let b = with {
+            let d = diffPixels(a, b, loupeArea)
+            check("取色器悬停时出现放大面板", d > 300, "\(d) 个采样点不同")
+        } else {
+            check("取色器悬停时出现放大面板", false, "窗口不可见，无法渲染")
+        }
+
+        // 换回别的工具，面板应当消失
+        sc.setTool(.pen); pump(0.1); pump(0.3)
+        if let a = with, let b = renderView() {
+            let d = diffPixels(a, b, loupeArea)
+            check("非取色工具不显示面板", d > 300, "\(d) 个采样点不同")
+        }
+        view.clearHoverForTest()
+        sc.setTool(.pen); sc.clearAll(); pump(0.15)
+
         // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")

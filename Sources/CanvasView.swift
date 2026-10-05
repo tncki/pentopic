@@ -685,20 +685,34 @@ final class CanvasView: NSView {
         // ---- 放大区：裁到面板圆角内再画 ----
         ctx.saveGState()
         ctx.addPath(outline); ctx.clip()
-        // 显示约 25×19 个像素；关掉插值 → 像素边界清楚，取色时看得见自己取的是哪一格
-        let zoom: CGFloat = 8
+        // 显示约 34×25 个屏幕像素；关掉插值 → 像素边界清楚，看得见自己取的是哪一格
+        let zoom: CGFloat = 6
         let sw = max(3, (w / zoom).rounded()), sh = max(3, (magH / zoom).rounded())
         let src = CGRect(x: CGFloat(px) - sw / 2, y: CGFloat(py) - sh / 2, width: sw, height: sh)
-        if let sub = full.cropping(to: src) {
+        // 源矩形要**夹回图像范围内**。cropping(to:) 要求矩形完全落在图内，
+        // 光标贴边时它返回 nil —— 早先直接填了一片白色，看起来像"放大区是空的"。
+        // 夹取之后按同样的比例缩小绘制区域，边缘处也始终有真实内容。
+        let inside = CGRect(x: 0, y: 0, width: full.width, height: full.height)
+        let clipped = src.intersection(inside)
+        if !clipped.isNull, clipped.width >= 1, clipped.height >= 1,
+           let sub = full.cropping(to: clipped) {
+            let kx = magRect.width / src.width, ky = magRect.height / src.height
+            let dst = CGRect(x: magRect.minX + (clipped.minX - src.minX) * kx,
+                             y: magRect.minY + (clipped.minY - src.minY) * ky,
+                             width: clipped.width * kx, height: clipped.height * ky)
             ctx.saveGState()
             ctx.interpolationQuality = .none
-            ctx.translateBy(x: magRect.minX, y: magRect.maxY)
+            ctx.translateBy(x: dst.minX, y: dst.maxY)
             ctx.scaleBy(x: 1, y: -1)
-            ctx.draw(sub, in: CGRect(origin: .zero, size: magRect.size))
+            ctx.draw(sub, in: CGRect(origin: .zero, size: dst.size))
             ctx.restoreGState()
         } else {
             ctx.setFillColor(NSColor.white.cgColor); ctx.fill(magRect)
         }
+        // 取景框：内容本身是纯色时，没有这圈线就分不清"放大区"和面板留白
+        ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.20).cgColor)
+        ctx.setLineWidth(1)
+        ctx.stroke(magRect.insetBy(dx: 0.5, dy: 0.5))
         // 十字准线：先描一圈白，再画深绿 —— 深色和浅色画面上都看得见
         let cx = magRect.midX, cy = magRect.midY
         let bar: CGFloat = 9

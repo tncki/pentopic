@@ -1589,10 +1589,59 @@ enum SelfTest {
             check("非取色工具不显示面板", d > 300, "\(d) 个采样点不同")
         }
 
-        // 存一张给肉眼看的证据
+        // 诊断：放大区里到底有没有"内容"？
+        // 用棋盘格背景，放大区里应当出现**多种颜色**。如果只有一种，
+        // 说明放大区画的是空白/纯色 —— 用户看到的"没有放大区域"就是这个。
+        sc.clearAll(); pump(0.15)
+        let pw2 = Int(st.pointSize.width * st.scale), ph2 = Int(st.pointSize.height * st.scale)
+        st.clipboardCG = makeChecker(pw2, ph2, cell: 10)
+        st.clipboardSize = st.pointSize
+        st.background = .clipboard
+        st.rebuild(); pump(0.3)
         sc.setTool(.eyedropper); pump(0.1)
-        view.setHoverForTest(loupeProbe); pump(0.3)
+        view.setHoverForTest(loupeProbe); pump(0.35)
+        if let shot = renderView() {
+            // 放大区：面板左上角在 (probe+22)，放大区尺寸 204×152
+            var seen = Set<String>()
+            var yy = (loupeProbe.y + 22 + 12) * st.scale
+            while yy < (loupeProbe.y + 22 + 140) * st.scale {
+                var xx = (loupeProbe.x + 22 + 12) * st.scale
+                while xx < (loupeProbe.x + 22 + 192) * st.scale {
+                    if let c = PixelSampler.color(of: shot, at: CGPoint(x: xx, y: yy))?.usingColorSpace(.sRGB) {
+                        seen.insert(c.hexString)
+                    }
+                    xx += 4
+                }
+                yy += 4
+            }
+            log("  放大区里的颜色数: \(seen.count)  样例: \(seen.sorted().prefix(4).joined(separator: " "))")
+            check("放大区显示的是放大的画面（不是纯色）", seen.count >= 3, "\(seen.count) 种颜色")
+        }
         writeImage(renderView(), "30-eyedropper-loupe.png")
+
+        // 贴边：光标靠近屏幕边缘时，放大区**仍然要有真实内容**。
+        // 早先这里会因为 cropping 越界而填成一片空白。
+        let edgeProbe = CGPoint(x: 6, y: 6)
+        view.setHoverForTest(edgeProbe); pump(0.35)
+        if let shot = renderView() {
+            var seen = Set<String>()
+            var yy = (edgeProbe.y + 22 + 12) * st.scale
+            while yy < (edgeProbe.y + 22 + 140) * st.scale {
+                var xx = (edgeProbe.x + 22 + 12) * st.scale
+                while xx < (edgeProbe.x + 22 + 192) * st.scale {
+                    if let c = PixelSampler.color(of: shot, at: CGPoint(x: xx, y: yy))?.usingColorSpace(.sRGB) {
+                        seen.insert(c.hexString)
+                    }
+                    xx += 4
+                }
+                yy += 4
+            }
+            log("  贴边时放大区的颜色数: \(seen.count)")
+            check("光标贴边时放大区仍有内容", seen.count >= 3, "\(seen.count) 种颜色")
+        }
+        st.background = .currentScreen; st.clipboardCG = nil
+        view.setHoverForTest(loupeProbe)
+        sc.clearAll(); pump(0.2)
 
         // ⌘C 复制色值 —— 面板上写了这个提示，就必须真的能按
         sc.setTool(.eyedropper); pump(0.1)

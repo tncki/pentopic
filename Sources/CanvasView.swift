@@ -236,7 +236,13 @@ final class CanvasState {
     }
     func invalidateZoomCache() { composedCache = nil }
 
-    func rebuild() { layer.rebuild(from: strokes) }
+    func rebuild() {
+        layer.rebuild(from: strokes)
+        // 组合结果（背景 + 标注）变了，缓存的放大源图必须一起作废。
+        // 早先这里没清缓存：画完一笔之后，放大面板与缩放视图显示的还是**上一版画面**，
+        // 看起来像"放大区没反应"。缓存和它依赖的数据必须一起失效 —— 漏一个就是这种 bug。
+        invalidateZoomCache()
+    }
 
     var visibleSourceRect: CGRect {
         let w = pointSize.width / zoom, h = pointSize.height / zoom
@@ -651,10 +657,22 @@ final class CanvasView: NSView {
     /// 画面与十字准线，不用先点一下再看结果。
     /// 放大面板的几何。**绘制与脏矩形必须用同一套算法** ——
     /// 两边各算一次的话，位置一旦对不上就会在屏幕上留下残影。
-    static let loupeWidth: CGFloat = 204
-    static let loupeMagHeight: CGFloat = 152
-    static let loupeRowHeight: CGFloat = 24
-    static var loupeHeight: CGFloat { loupeMagHeight + 1 + loupeRowHeight * 3 + 14 }
+    static let loupeWidth: CGFloat = 158
+    static let loupeMagHeight: CGFloat = 104
+    static let loupeRowHeight: CGFloat = 21
+    static var loupeHeight: CGFloat { loupeMagHeight + 1 + loupeRowHeight * 3 + 12 }
+
+    /// 面板阴影响外延伸的范围（blur + offset）。失效区域必须至少外扩这么多，
+    /// 否则移走面板时**阴影外圈会留在屏幕上**，就是肉眼看到的残影。
+    static let loupeShadowMargin: CGFloat = 22
+
+    /// 自检用：面板移走时应当失效的区域。必须完整覆盖阴影，否则会留残影。
+    func loupeInvalidationRect(for p: CGPoint) -> CGRect {
+        loupeRect(for: p).insetBy(dx: -Self.loupeShadowMargin, dy: -Self.loupeShadowMargin)
+    }
+
+    /// 自检用：面板阴影实际向外延伸的范围（blur + offset）
+    static let loupeShadowExtent: CGFloat = 14 + 3
 
     func loupeRect(for p: CGPoint) -> CGRect {
         let w = Self.loupeWidth, h = Self.loupeHeight
@@ -674,9 +692,9 @@ final class CanvasView: NSView {
         let w = Self.loupeWidth
         let magH = Self.loupeMagHeight
         let rowH = Self.loupeRowHeight
-        let padX: CGFloat = 18
-        let infoH = rowH * 3 + 14
-        let radius: CGFloat = 15
+        let padX: CGFloat = 14
+        let infoH = rowH * 3 + 12
+        let radius: CGFloat = 12
         let h = Self.loupeHeight
 
         let px = min(max(Int(mousePoint.x * state.scale), 0), full.width - 1)
@@ -702,7 +720,7 @@ final class CanvasView: NSView {
         ctx.saveGState()
         ctx.addPath(outline); ctx.clip()
         // 显示约 34×25 个屏幕像素；关掉插值 → 像素边界清楚，看得见自己取的是哪一格
-        let zoom: CGFloat = 6
+        let zoom: CGFloat = 5
         let sw = max(3, (w / zoom).rounded()), sh = max(3, (magH / zoom).rounded())
         let src = CGRect(x: CGFloat(px) - sw / 2, y: CGFloat(py) - sh / 2, width: sw, height: sh)
         // 源矩形要**夹回图像范围内**。cropping(to:) 要求矩形完全落在图内，
@@ -755,7 +773,7 @@ final class CanvasView: NSView {
 
         // ---- 信息区：带标签的三行 ----
         let labelX = panel.minX + padX
-        let valueX = panel.minX + padX + 74
+        let valueX = panel.minX + padX + 56
         var rowY = magRect.maxY + 8
         func text(_ str: String, _ x: CGFloat, _ y: CGFloat, _ size: CGFloat,
                   _ color: NSColor, _ bold: Bool, _ mono: Bool) {
@@ -768,15 +786,15 @@ final class CanvasView: NSView {
         let labelColor = NSColor(srgbRed: 0.42, green: 0.42, blue: 0.44, alpha: 1)
         let valueColor = NSColor(srgbRed: 0.10, green: 0.10, blue: 0.12, alpha: 1)
 
-        text(LS("Position", "Position", "坐标", "座標"), labelX, rowY, 13, labelColor, false, false)
-        text("\(px), \(py)", valueX, rowY, 14, valueColor, true, true)
+        text(LS("Position", "Position", "坐标", "座標"), labelX, rowY, 11.5, labelColor, false, false)
+        text("\(px), \(py)", valueX, rowY, 12.5, valueColor, true, true)
         rowY += rowH
-        text(LS("Farbe", "Colour", "色值", "色值"), labelX, rowY, 13, labelColor, false, false)
-        text(col.hexString, valueX, rowY, 14, valueColor, true, true)
+        text(LS("Farbe", "Colour", "色值", "色值"), labelX, rowY, 11.5, labelColor, false, false)
+        text(col.hexString, valueX, rowY, 12.5, valueColor, true, true)
         rowY += rowH
         text(LS("⌘+C kopiert den Farbwert", "⌘+C copies the colour",
                 "按 ⌘+C 复制色值", "按 ⌘+C 複製色值"),
-             labelX, rowY, 11.5,
+             labelX, rowY, 10,
              NSColor(srgbRed: 0.60, green: 0.60, blue: 0.62, alpha: 1), false, false)
     }
 
@@ -983,7 +1001,8 @@ final class CanvasView: NSView {
         // 放大面板跟着鼠标走。**只重画面板所在的那两小块** ——
         // 常驻状态下每次鼠标移动都重绘整张 3K 画布太浪费。
         if Prefs.loupeEnabled, !state.isZoomed {
-            let now = loupeRect(for: p).insetBy(dx: -3, dy: -3)
+            let pad = Self.loupeShadowMargin
+            let now = loupeRect(for: p).insetBy(dx: -pad, dy: -pad)
             setNeedsDisplay(now.union(lastLoupeDrawn))
         }
         // 选区工具要跟着画尺寸提示
@@ -998,7 +1017,10 @@ final class CanvasView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         hasMouse = false
-        if lastLoupeDrawn != .zero { setNeedsDisplay(lastLoupeDrawn.insetBy(dx: -3, dy: -3)); lastLoupeDrawn = .zero }
+        if lastLoupeDrawn != .zero {
+            setNeedsDisplay(lastLoupeDrawn.insetBy(dx: -Self.loupeShadowMargin, dy: -Self.loupeShadowMargin))
+            lastLoupeDrawn = .zero
+        }
         controller?.magnifier?.orderOut(nil)
         needsDisplay = true
     }

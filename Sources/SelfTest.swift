@@ -1619,10 +1619,10 @@ enum SelfTest {
         if let shot = renderView() {
             // 放大区：面板左上角在 (probe+22)，放大区尺寸 204×152
             var seen = Set<String>()
-            var yy = (loupeProbe.y + 22 + 12) * st.scale
-            while yy < (loupeProbe.y + 22 + 140) * st.scale {
-                var xx = (loupeProbe.x + 22 + 12) * st.scale
-                while xx < (loupeProbe.x + 22 + 192) * st.scale {
+            var yy = (loupeProbe.y + 22 + 8) * st.scale
+            while yy < (loupeProbe.y + 22 + 96) * st.scale {
+                var xx = (loupeProbe.x + 22 + 8) * st.scale
+                while xx < (loupeProbe.x + 22 + 150) * st.scale {
                     if let c = PixelSampler.color(of: shot, at: CGPoint(x: xx, y: yy))?.usingColorSpace(.sRGB) {
                         seen.insert(c.hexString)
                     }
@@ -1631,6 +1631,44 @@ enum SelfTest {
                 yy += 4
             }
             log("  放大区里的颜色数: \(seen.count)  样例: \(seen.sorted().prefix(4).joined(separator: " "))")
+            // 沿放大区中线横向采样，看清到底显示的是什么
+            var row: [String] = []
+            var sx = (loupeProbe.x + 22 + 8) * st.scale
+            while sx < (loupeProbe.x + 22 + 150) * st.scale {
+                row.append(PixelSampler.color(of: shot, at: CGPoint(x: sx, y: (loupeProbe.y + 22 + 52) * st.scale))?.usingColorSpace(.sRGB)?.hexString ?? "?")
+                sx += 24
+            }
+            log("  放大区中线: \(row.joined(separator: " "))")
+            // 放大区显示的内容必须与画布**当前**内容一致。
+            // 早先 rebuild() 不清组合缓存，放大区显示的是上一版画面。
+            // 放大区就是面板顶部那一整块（没有内边距），源窗口是 px±sw/2 的 sw×sh 像素
+            let magW = CanvasView.loupeWidth, magH = CanvasView.loupeMagHeight
+            let sw = (magW / 5).rounded(), sh = (magH / 5).rounded()
+            let originX = (loupeProbe.x + 22) * st.scale, originY = (loupeProbe.y + 22) * st.scale
+            var mismatch = 0, checked = 0
+            var vx = originX + 6 * st.scale
+            while vx < originX + (magW - 6) * st.scale {
+                var vy = originY + 6 * st.scale
+                while vy < originY + (magH - 6) * st.scale {
+                    // 放大区里 (vx,vy) 对应画面上的哪一点
+                    let fx = (loupeProbe.x * st.scale - sw / 2) + (vx - originX) / st.scale * (sw / magW)
+                    let fy = (loupeProbe.y * st.scale - sh / 2) + (vy - originY) / st.scale * (sh / magH)
+                    if let drawn = PixelSampler.color(of: shot, at: CGPoint(x: vx, y: vy))?.usingColorSpace(.sRGB),
+                       let truth = st.composeCG().flatMap({ PixelSampler.color(of: $0, at: CGPoint(x: fx, y: fy)) })?.usingColorSpace(.sRGB) {
+                        // 十字准线覆盖的地方跳过
+                        if drawn.hexString != "#29593D" {
+                            checked += 1
+                            if drawn.hexString != truth.hexString { mismatch += 1 }
+                        }
+                    }
+                    vy += 3 * st.scale
+                }
+                vx += 3 * st.scale
+            }
+            // 允许少量不符：棋盘格边界上差一个像素就会翻色，那是取整误差不是 bug
+            check("放大区内容与画布当前内容一致", checked > 200 && mismatch * 8 < checked,
+                  "核对 \(checked) 点，不符 \(mismatch) 点")
+            log("  画布该处像素: \(st.composeCG().flatMap { PixelSampler.color(of: $0, at: CGPoint(x: loupeProbe.x * st.scale, y: loupeProbe.y * st.scale)) }?.usingColorSpace(.sRGB)?.hexString ?? "?")")
             check("放大区显示的是放大的画面（不是纯色）", seen.count >= 3, "\(seen.count) 种颜色")
         }
         writeImage(renderView(), "30-eyedropper-loupe.png")
@@ -1641,10 +1679,10 @@ enum SelfTest {
         view.setHoverForTest(edgeProbe); pump(0.35)
         if let shot = renderView() {
             var seen = Set<String>()
-            var yy = (edgeProbe.y + 22 + 12) * st.scale
-            while yy < (edgeProbe.y + 22 + 140) * st.scale {
-                var xx = (edgeProbe.x + 22 + 12) * st.scale
-                while xx < (edgeProbe.x + 22 + 192) * st.scale {
+            var yy = (edgeProbe.y + 22 + 8) * st.scale
+            while yy < (edgeProbe.y + 22 + 96) * st.scale {
+                var xx = (edgeProbe.x + 22 + 8) * st.scale
+                while xx < (edgeProbe.x + 22 + 150) * st.scale {
                     if let c = PixelSampler.color(of: shot, at: CGPoint(x: xx, y: yy))?.usingColorSpace(.sRGB) {
                         seen.insert(c.hexString)
                     }
@@ -1670,6 +1708,18 @@ enum SelfTest {
         check("⌘C 在画笔下也被接管", cmdHandled, cmdHandled ? "✅" : "没处理")
         check("⌘C 复制的是光标处的色值", expected != nil && pasted == expected,
               "剪贴板 \(pasted ?? "空")，应为 \(expected ?? "?")")
+        // 残影：面板移走时，失效区域必须**完整覆盖阴影**。
+        // 不能用"渲染前后对比"来测 —— cacheDisplay 强制全量重绘，
+        // 脏矩形算错在这种测试里根本暴露不出来，只有几何断言能锁住。
+        let probePanel = view.loupeRect(for: loupeProbe)
+        let probeInvalid = view.loupeInvalidationRect(for: loupeProbe)
+        let need = probePanel.insetBy(dx: -CanvasView.loupeShadowExtent, dy: -CanvasView.loupeShadowExtent)
+        check("面板失效区完整覆盖阴影", probeInvalid.contains(need),
+              String(format: "失效 %.0f×%.0f，需要 %.0f×%.0f",
+                     probeInvalid.width, probeInvalid.height, need.width, need.height))
+        check("失效区确实比面板大", probeInvalid.width > probePanel.width + 20,
+              String(format: "面板 %.0f 宽，失效 %.0f 宽", probePanel.width, probeInvalid.width))
+
         Prefs.loupeEnabled = keepLoupePref
         view.clearHoverForTest()
         sc.setTool(.pen); sc.clearAll(); pump(0.15)

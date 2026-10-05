@@ -1588,6 +1588,22 @@ enum SelfTest {
             let d = diffPixels(a, b, loupeArea)
             check("非取色工具不显示面板", d > 300, "\(d) 个采样点不同")
         }
+
+        // 存一张给肉眼看的证据
+        sc.setTool(.eyedropper); pump(0.1)
+        view.setHoverForTest(loupeProbe); pump(0.3)
+        writeImage(renderView(), "30-eyedropper-loupe.png")
+
+        // ⌘C 复制色值 —— 面板上写了这个提示，就必须真的能按
+        sc.setTool(.eyedropper); pump(0.1)
+        view.setHoverForTest(loupeProbe)
+        let expected = view.copyColourUnderCursor(canvas: st)
+        NSPasteboard.general.clearContents()
+        let cmdHandled = sc.handleKeyDownForTest(keyCode: 8, flags: [.command], chars: "c")   // 8 = C
+        let pasted = NSPasteboard.general.string(forType: .string)
+        check("⌘C 被取色器接管", cmdHandled, cmdHandled ? "✅" : "没处理")
+        check("⌘C 复制的是光标处的色值", expected != nil && pasted == expected,
+              "剪贴板 \(pasted ?? "空")，应为 \(expected ?? "?")")
         view.clearHoverForTest()
         sc.setTool(.pen); sc.clearAll(); pump(0.15)
 

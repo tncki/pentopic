@@ -955,10 +955,11 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     // MARK: 自检钩子
     var modelSelectedCount: Int { model.selectedCount }
-    func handleKeyDownForTest(keyCode: UInt16) -> Bool {
-        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+    func handleKeyDownForTest(keyCode: UInt16, flags: NSEvent.ModifierFlags = [],
+                              chars: String = "") -> Bool {
+        guard let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
                                        timestamp: 0, windowNumber: 0, context: nil,
-                                       characters: "", charactersIgnoringModifiers: "",
+                                       characters: chars, charactersIgnoringModifiers: chars,
                                        isARepeat: false, keyCode: keyCode) else { return false }
         return handleKeyDown(e)
     }
@@ -1481,6 +1482,16 @@ final class SessionController: NSObject, NSMenuDelegate {
             views.forEach { $0.moveRegionBy(dx: dx, dy: dy) }
             return true
         default: break
+        }
+
+        // ⌘C：取色器下复制光标处的色值。放大面板上就写着这个提示 ——
+        // 提示里写了快捷键，就必须真的能按。
+        if cmd, event.charactersIgnoringModifiers?.lowercased() == "c", tool == .eyedropper {
+            guard let v = views.first(where: { $0.hasMousePoint }), let st = activeCanvas,
+                  let hex = v.copyColourUnderCursor(canvas: st) else { return false }
+            flashStatus(LS("Farbe \(hex) kopiert", "Colour \(hex) copied",
+                           "已复制颜色 \(hex)", "已複製顏色 \(hex)"))
+            return true
         }
 
         guard !cmd else { return false }

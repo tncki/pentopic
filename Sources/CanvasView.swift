@@ -604,6 +604,19 @@ final class CanvasView: NSView {
     var cursorForTest: NSCursor { currentCursor() }
     /// 自检里模拟"鼠标悬停在某处"，而不必真的合成一个 mouseMoved 事件。
     func setHoverForTest(_ p: CGPoint) { mousePoint = p; hasMouse = true }
+
+    /// 复制光标所在像素的色值（取色放大面板上写的就是这个快捷键）。
+    @discardableResult
+    func copyColourUnderCursor(canvas st: CanvasState) -> String? {
+        guard hasMouse, let full = st.zoomSource(),
+              let col = PixelSampler.color(of: full, at: CGPoint(x: mousePoint.x * st.scale,
+                                                                 y: mousePoint.y * st.scale))
+        else { return nil }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(col.hexString, forType: .string)
+        return col.hexString
+    }
     func clearHoverForTest() { hasMouse = false }
 
     // MARK: 绘制
@@ -632,91 +645,109 @@ final class CanvasView: NSView {
     ///
     /// 取色的难点从来不是"点得准"，而是**看不清自己点的是哪个像素** ——
     /// 屏幕上相邻两个像素常常只差一点点颜色。所以光标旁边直接给出放大后的
-    /// 像素格、坐标与色值，不用先点一下再看结果。
+    /// 画面与十字准线，不用先点一下再看结果。
     private func drawEyedropperLoupe(_ ctx: CGContext) {
         guard let c = controller, c.tool == .eyedropper,
               hasMouse, !isDragging, !state.isZoomed else { return }
         guard let full = state.zoomSource() else { return }   // 带缓存，悬停时不会每帧重合成
 
-        let cells = 13                       // 放大 13×13 个像素
-        let cell: CGFloat = 11
-        let grid = CGFloat(cells) * cell
-        let pad: CGFloat = 9
-        let infoH: CGFloat = 54
-        let w = grid + pad * 2, h = grid + pad * 2 + infoH
+        let w: CGFloat = 204
+        let magH: CGFloat = 152
+        let rowH: CGFloat = 24
+        let padX: CGFloat = 18
+        let infoH = rowH * 3 + 14
+        let radius: CGFloat = 15
+        let h = magH + 1 + infoH
 
-        // 取不到像素（超出画面）就什么都不画，别画一个空面板
         let px = min(max(Int(mousePoint.x * state.scale), 0), full.width - 1)
         let py = min(max(Int(mousePoint.y * state.scale), 0), full.height - 1)
         guard let col = PixelSampler.color(of: full, at: CGPoint(x: px, y: py)) else { return }
 
         // 默认放在光标右下；贴边时翻到另一侧，免得盖住正在取的那个像素
-        var ox = mousePoint.x + 20, oy = mousePoint.y + 20
-        if ox + w > bounds.maxX - 6 { ox = mousePoint.x - 20 - w }
-        if oy + h > bounds.maxY - 6 { oy = mousePoint.y - 20 - h }
+        var ox = mousePoint.x + 22, oy = mousePoint.y + 22
+        if ox + w > bounds.maxX - 6 { ox = mousePoint.x - 22 - w }
+        if oy + h > bounds.maxY - 6 { oy = mousePoint.y - 22 - h }
         ox = max(6, ox); oy = max(6, oy)
         let panel = CGRect(x: ox, y: oy, width: w, height: h)
+        let magRect = CGRect(x: panel.minX, y: panel.minY, width: w, height: magH)
 
         ctx.saveGState()
         defer { ctx.restoreGState() }
 
-        // 面板底
-        let outline = CGPath(roundedRect: panel, cornerWidth: 11, cornerHeight: 11, transform: nil)
-        ctx.setShadow(offset: CGSize(width: 0, height: 2), blur: 12,
-                      color: NSColor.black.withAlphaComponent(0.4).cgColor)
-        ctx.setFillColor(NSColor(srgbRed: 0.10, green: 0.10, blue: 0.11, alpha: 0.97).cgColor)
+        // ---- 面板：浅色、圆角、细边框 ----
+        let outline = CGPath(roundedRect: panel, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        ctx.setShadow(offset: CGSize(width: 0, height: 3), blur: 14,
+                      color: NSColor.black.withAlphaComponent(0.30).cgColor)
+        ctx.setFillColor(NSColor(srgbRed: 0.99, green: 0.99, blue: 0.99, alpha: 0.97).cgColor)
         ctx.addPath(outline); ctx.fillPath()
         ctx.setShadow(offset: .zero, blur: 0, color: nil)
-        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.16).cgColor)
-        ctx.setLineWidth(1); ctx.addPath(outline); ctx.strokePath()
 
-        // 放大的像素：直接画裁出来的小图并关掉插值 → 得到干净的像素格
-        let gridRect = CGRect(x: panel.minX + pad, y: panel.minY + pad, width: grid, height: grid)
-        let half = cells / 2
-        let src = CGRect(x: px - half, y: py - half, width: cells, height: cells)
+        // ---- 放大区：裁到面板圆角内再画 ----
+        ctx.saveGState()
+        ctx.addPath(outline); ctx.clip()
+        // 显示约 25×19 个像素；关掉插值 → 像素边界清楚，取色时看得见自己取的是哪一格
+        let zoom: CGFloat = 8
+        let sw = max(3, (w / zoom).rounded()), sh = max(3, (magH / zoom).rounded())
+        let src = CGRect(x: CGFloat(px) - sw / 2, y: CGFloat(py) - sh / 2, width: sw, height: sh)
         if let sub = full.cropping(to: src) {
             ctx.saveGState()
             ctx.interpolationQuality = .none
-            ctx.translateBy(x: gridRect.minX, y: gridRect.maxY)
+            ctx.translateBy(x: magRect.minX, y: magRect.maxY)
             ctx.scaleBy(x: 1, y: -1)
-            ctx.draw(sub, in: CGRect(origin: .zero, size: gridRect.size))
+            ctx.draw(sub, in: CGRect(origin: .zero, size: magRect.size))
             ctx.restoreGState()
-
-            // 标出正被取样的那一个像素
-            let cw = grid / CGFloat(cells)
-            let centre = CGRect(x: gridRect.minX + CGFloat(half) * cw,
-                                y: gridRect.minY + CGFloat(half) * cw, width: cw, height: cw)
-            ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.8).cgColor)
-            ctx.setLineWidth(3); ctx.stroke(centre.insetBy(dx: -1, dy: -1))
-            ctx.setStrokeColor(NSColor.white.cgColor)
-            ctx.setLineWidth(1.5); ctx.stroke(centre.insetBy(dx: -0.75, dy: -0.75))
+        } else {
+            ctx.setFillColor(NSColor.white.cgColor); ctx.fill(magRect)
         }
-
-        // 信息区：色块 + 色值 + 坐标 + 快捷键提示
-        let infoY = gridRect.maxY + 7
-        let swatch = CGRect(x: panel.minX + pad, y: infoY, width: 34, height: 34)
-        ctx.setFillColor(col.cgColor); ctx.fill(swatch)
-        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.3).cgColor)
-        ctx.setLineWidth(1); ctx.stroke(swatch)
-
-        func text(_ s: String, _ x: CGFloat, _ y: CGFloat, _ size: CGFloat, _ bold: Bool, _ alpha: CGFloat) {
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: size, weight: bold ? .semibold : .regular),
-                .foregroundColor: NSColor.white.withAlphaComponent(alpha)
-            ]
-            (s as NSString).draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
+        // 十字准线：先描一圈白，再画深绿 —— 深色和浅色画面上都看得见
+        let cx = magRect.midX, cy = magRect.midY
+        let bar: CGFloat = 9
+        func cross(_ inset: CGFloat, _ color: NSColor, _ width: CGFloat) {
+            ctx.setStrokeColor(color.cgColor)
+            ctx.setLineWidth(width)
+            ctx.setLineCap(.butt)
+            ctx.move(to: CGPoint(x: cx, y: magRect.minY + inset))
+            ctx.addLine(to: CGPoint(x: cx, y: magRect.maxY - inset))
+            ctx.move(to: CGPoint(x: magRect.minX + inset, y: cy))
+            ctx.addLine(to: CGPoint(x: magRect.maxX - inset, y: cy))
+            ctx.strokePath()
         }
-        let tx = swatch.maxX + 9
-        text(col.hexString, tx, infoY + 1, 14, true, 1.0)
-        let r = Int((col.redComponent * 255).rounded())
-        let g = Int((col.greenComponent * 255).rounded())
-        let b = Int((col.blueComponent * 255).rounded())
-        text("R \(r)  G \(g)  B \(b)", tx, infoY + 19, 11, false, 0.75)
-        text("X \(px)  Y \(py)", panel.minX + pad, infoY + 40, 10.5, false, 0.55)
-        // 缩放后才是屏幕坐标；高倍屏下这个数字才是用户能对上系统取色器的那个
-        text(LS("Klick: übernehmen + kopieren", "Click: pick + copy",
-                "点击：取样并复制色值", "點擊：取樣並複製色值"),
-             tx, infoY + 40, 10.5, false, 0.55)
+        cross(0, .white, bar + 4)
+        cross(0, NSColor(srgbRed: 0.16, green: 0.35, blue: 0.24, alpha: 1), bar)
+        ctx.restoreGState()
+
+        // ---- 分隔线 ----
+        ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.13).cgColor)
+        ctx.setLineWidth(1)
+        ctx.move(to: CGPoint(x: panel.minX, y: magRect.maxY + 0.5))
+        ctx.addLine(to: CGPoint(x: panel.maxX, y: magRect.maxY + 0.5))
+        ctx.strokePath()
+
+        // ---- 信息区：带标签的三行 ----
+        let labelX = panel.minX + padX
+        let valueX = panel.minX + padX + 74
+        var rowY = magRect.maxY + 8
+        func text(_ str: String, _ x: CGFloat, _ y: CGFloat, _ size: CGFloat,
+                  _ color: NSColor, _ bold: Bool, _ mono: Bool) {
+            let font: NSFont = mono
+                ? NSFont.monospacedDigitSystemFont(ofSize: size, weight: bold ? .semibold : .regular)
+                : NSFont.systemFont(ofSize: size, weight: bold ? .semibold : .regular)
+            (str as NSString).draw(at: NSPoint(x: x, y: y),
+                                   withAttributes: [.font: font, .foregroundColor: color])
+        }
+        let labelColor = NSColor(srgbRed: 0.42, green: 0.42, blue: 0.44, alpha: 1)
+        let valueColor = NSColor(srgbRed: 0.10, green: 0.10, blue: 0.12, alpha: 1)
+
+        text(LS("Position", "Position", "坐标", "座標"), labelX, rowY, 13, labelColor, false, false)
+        text("\(px), \(py)", valueX, rowY, 14, valueColor, true, true)
+        rowY += rowH
+        text(LS("Farbe", "Colour", "色值", "色值"), labelX, rowY, 13, labelColor, false, false)
+        text(col.hexString, valueX, rowY, 14, valueColor, true, true)
+        rowY += rowH
+        text(LS("⌘+C kopiert den Farbwert", "⌘+C copies the colour",
+                "按 ⌘+C 复制色值", "按 ⌘+C 複製色值"),
+             labelX, rowY, 11.5,
+             NSColor(srgbRed: 0.60, green: 0.60, blue: 0.62, alpha: 1), false, false)
     }
 
     private func drawZoom(_ ctx: CGContext) {

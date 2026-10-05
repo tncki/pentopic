@@ -533,6 +533,9 @@ final class CanvasView: NSView {
         addCursorRect(bounds, cursor: currentCursor())
     }
 
+    /// 上一次画出的面板位置，用于只重画这一小块
+    private var lastLoupeDrawn: CGRect = .zero
+
     private func currentCursor() -> NSCursor {
         guard let c = controller else { return .arrow }
         let tool = c.tool
@@ -646,30 +649,43 @@ final class CanvasView: NSView {
     /// 取色的难点从来不是"点得准"，而是**看不清自己点的是哪个像素** ——
     /// 屏幕上相邻两个像素常常只差一点点颜色。所以光标旁边直接给出放大后的
     /// 画面与十字准线，不用先点一下再看结果。
+    /// 放大面板的几何。**绘制与脏矩形必须用同一套算法** ——
+    /// 两边各算一次的话，位置一旦对不上就会在屏幕上留下残影。
+    static let loupeWidth: CGFloat = 204
+    static let loupeMagHeight: CGFloat = 152
+    static let loupeRowHeight: CGFloat = 24
+    static var loupeHeight: CGFloat { loupeMagHeight + 1 + loupeRowHeight * 3 + 14 }
+
+    func loupeRect(for p: CGPoint) -> CGRect {
+        let w = Self.loupeWidth, h = Self.loupeHeight
+        var ox = p.x + 22, oy = p.y + 22
+        if ox + w > bounds.maxX - 6 { ox = p.x - 22 - w }
+        if oy + h > bounds.maxY - 6 { oy = p.y - 22 - h }
+        return CGRect(x: max(6, ox), y: max(6, oy), width: w, height: h)
+    }
+
+    /// 取色/查看用的放大面板。根据设置常驻，不再只服务于取色器 ——
+    /// "看不清自己点的是哪个像素"这个问题，在你还没切到取色器时就已经存在了。
     private func drawEyedropperLoupe(_ ctx: CGContext) {
-        guard let c = controller, c.tool == .eyedropper,
-              hasMouse, !isDragging, !state.isZoomed else { return }
+        guard Prefs.loupeEnabled, hasMouse, !state.isZoomed,
+              controller?.tool != .magnifier else { return }   // 放大镜工具有自己的浮窗
         guard let full = state.zoomSource() else { return }   // 带缓存，悬停时不会每帧重合成
 
-        let w: CGFloat = 204
-        let magH: CGFloat = 152
-        let rowH: CGFloat = 24
+        let w = Self.loupeWidth
+        let magH = Self.loupeMagHeight
+        let rowH = Self.loupeRowHeight
         let padX: CGFloat = 18
         let infoH = rowH * 3 + 14
         let radius: CGFloat = 15
-        let h = magH + 1 + infoH
+        let h = Self.loupeHeight
 
         let px = min(max(Int(mousePoint.x * state.scale), 0), full.width - 1)
         let py = min(max(Int(mousePoint.y * state.scale), 0), full.height - 1)
         guard let col = PixelSampler.color(of: full, at: CGPoint(x: px, y: py)) else { return }
 
-        // 默认放在光标右下；贴边时翻到另一侧，免得盖住正在取的那个像素
-        var ox = mousePoint.x + 22, oy = mousePoint.y + 22
-        if ox + w > bounds.maxX - 6 { ox = mousePoint.x - 22 - w }
-        if oy + h > bounds.maxY - 6 { oy = mousePoint.y - 22 - h }
-        ox = max(6, ox); oy = max(6, oy)
-        let panel = CGRect(x: ox, y: oy, width: w, height: h)
+        let panel = loupeRect(for: mousePoint)
         let magRect = CGRect(x: panel.minX, y: panel.minY, width: w, height: magH)
+        lastLoupeDrawn = panel
 
         ctx.saveGState()
         defer { ctx.restoreGState() }
@@ -964,10 +980,14 @@ final class CanvasView: NSView {
         // 光标要随鼠标**移动**实时变化，不能只在进入视图时设一次 ——
         // 指针工具划过笔画/选区/空白时，光标得跟着变。
         currentCursor().set()
-        // 取色器悬停时要画放大镜，所以它也要重绘；选区工具要跟着画尺寸提示。
-        if state.isZoomed || controller?.tool == .region || controller?.tool == .eyedropper {
-            needsDisplay = true
+        // 放大面板跟着鼠标走。**只重画面板所在的那两小块** ——
+        // 常驻状态下每次鼠标移动都重绘整张 3K 画布太浪费。
+        if Prefs.loupeEnabled, !state.isZoomed {
+            let now = loupeRect(for: p).insetBy(dx: -3, dy: -3)
+            setNeedsDisplay(now.union(lastLoupeDrawn))
         }
+        // 选区工具要跟着画尺寸提示
+        if state.isZoomed || controller?.tool == .region { needsDisplay = true }
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -978,6 +998,7 @@ final class CanvasView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         hasMouse = false
+        if lastLoupeDrawn != .zero { setNeedsDisplay(lastLoupeDrawn.insetBy(dx: -3, dy: -3)); lastLoupeDrawn = .zero }
         controller?.magnifier?.orderOut(nil)
         needsDisplay = true
     }

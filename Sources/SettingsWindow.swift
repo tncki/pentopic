@@ -5,6 +5,7 @@ import Carbon.HIToolbox
 final class SettingsModel: ObservableObject {
     @Published var language: String = "auto"
     @Published var cursorMode: Int = 0
+    @Published var loupeEnabled = true
     @Published var wheelZoom = true
     @Published var autoOpen = false
     @Published var quitOnFinish = false
@@ -32,6 +33,7 @@ final class SettingsModel: ObservableObject {
     func load() {
         language = Prefs.language?.rawValue ?? "auto"
         cursorMode = Prefs.cursorMode.rawValue
+        loupeEnabled = Prefs.loupeEnabled
         wheelZoom = Prefs.wheelZoom
         autoOpen = Prefs.autoOpen
         quitOnFinish = Prefs.quitOnFinish
@@ -61,6 +63,7 @@ final class SettingsModel: ObservableObject {
         Prefs.language = (language == "auto") ? nil : AppLang(rawValue: language)
         L.lang = Prefs.resolveLanguage()
         Prefs.cursorMode = CursorMode(rawValue: cursorMode) ?? .normal
+        Prefs.loupeEnabled = loupeEnabled
         Prefs.wheelZoom = wheelZoom
         Prefs.autoOpen = autoOpen
         Prefs.quitOnFinish = quitOnFinish
@@ -134,6 +137,11 @@ struct SettingsView: View {
                         Toggle(LS("Zoomansicht: Mausrad zum Zoomen verwenden",
                                   "Zoom view: use mouse wheel to zoom",
                                   "缩放视图：使用滚轮缩放", "縮放檢視：使用滾輪縮放"), isOn: $m.wheelZoom)
+                        Toggle(LS("Lupe neben dem Mauszeiger (Position, Farbe, ⌘C kopiert)",
+                                  "Loupe beside the cursor (position, colour, ⌘C to copy)",
+                                  "光标旁的放大面板（坐标、色值，⌘C 复制色值）",
+                                  "游標旁的放大面板（座標、色值，⌘C 複製色值）"),
+                               isOn: $m.loupeEnabled)
                     }
 
                     group(LS("Mehrere Bildschirme", "Multiple displays", "多显示器", "多螢幕")) {

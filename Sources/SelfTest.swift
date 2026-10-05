@@ -1570,24 +1570,40 @@ enum SelfTest {
             return n
         }
 
+        // 面板现在是**常驻**的：任何工具、悬停即显示，用设置开关控制。
+        let keepLoupePref = Prefs.loupeEnabled
         view.setHoverForTest(loupeProbe)
+
+        Prefs.loupeEnabled = false
         sc.setTool(.pen); pump(0.1); pump(0.3)
-        let without = renderView()
+        let off = renderView()
+
+        Prefs.loupeEnabled = true
+        sc.setTool(.pen); pump(0.1); pump(0.3)
+        let onPen = renderView()
         sc.setTool(.eyedropper); pump(0.1); pump(0.3)
-        let with = renderView()
-        if let a = without, let b = with {
+        let onPicker = renderView()
+
+        if let a = off, let b = onPen {
             let d = diffPixels(a, b, loupeArea)
-            check("取色器悬停时出现放大面板", d > 300, "\(d) 个采样点不同")
+            check("默认开启：画笔下也显示放大面板", d > 300, "\(d) 个采样点不同")
         } else {
-            check("取色器悬停时出现放大面板", false, "窗口不可见，无法渲染")
+            check("默认开启：画笔下也显示放大面板", false, "窗口不可见，无法渲染")
+        }
+        if let a = off, let b = onPicker {
+            let d = diffPixels(a, b, loupeArea)
+            check("取色器下同样显示", d > 300, "\(d) 个采样点不同")
         }
 
-        // 换回别的工具，面板应当消失
-        sc.setTool(.pen); pump(0.1); pump(0.3)
-        if let a = with, let b = renderView() {
+        // 关掉设置就应当消失
+        Prefs.loupeEnabled = false
+        sc.setTool(.eyedropper); pump(0.1); pump(0.3)
+        if let a = onPicker, let b = renderView() {
             let d = diffPixels(a, b, loupeArea)
-            check("非取色工具不显示面板", d > 300, "\(d) 个采样点不同")
+            check("设置里关掉后不再显示", d > 300, "\(d) 个采样点不同")
         }
+        Prefs.loupeEnabled = true
+        sc.setTool(.eyedropper); pump(0.1); pump(0.3)
 
         // 诊断：放大区里到底有没有"内容"？
         // 用棋盘格背景，放大区里应当出现**多种颜色**。如果只有一种，
@@ -1643,16 +1659,18 @@ enum SelfTest {
         view.setHoverForTest(loupeProbe)
         sc.clearAll(); pump(0.2)
 
-        // ⌘C 复制色值 —— 面板上写了这个提示，就必须真的能按
-        sc.setTool(.eyedropper); pump(0.1)
+        // ⌘C 复制色值 —— 面板上写了这个提示，就必须真的能按。
+        // 面板常驻之后，画着线顺手取色也该能用，不该逼人先切到取色器。
+        sc.setTool(.pen); pump(0.1)
         view.setHoverForTest(loupeProbe)
         let expected = view.copyColourUnderCursor(canvas: st)
         NSPasteboard.general.clearContents()
         let cmdHandled = sc.handleKeyDownForTest(keyCode: 8, flags: [.command], chars: "c")   // 8 = C
         let pasted = NSPasteboard.general.string(forType: .string)
-        check("⌘C 被取色器接管", cmdHandled, cmdHandled ? "✅" : "没处理")
+        check("⌘C 在画笔下也被接管", cmdHandled, cmdHandled ? "✅" : "没处理")
         check("⌘C 复制的是光标处的色值", expected != nil && pasted == expected,
               "剪贴板 \(pasted ?? "空")，应为 \(expected ?? "?")")
+        Prefs.loupeEnabled = keepLoupePref
         view.clearHoverForTest()
         sc.setTool(.pen); sc.clearAll(); pump(0.15)
 

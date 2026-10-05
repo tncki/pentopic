@@ -1484,9 +1484,10 @@ final class SessionController: NSObject, NSMenuDelegate {
         default: break
         }
 
-        // ⌘C：取色器下复制光标处的色值。放大面板上就写着这个提示 ——
-        // 提示里写了快捷键，就必须真的能按。
-        if cmd, event.charactersIgnoringModifiers?.lowercased() == "c", tool == .eyedropper {
+        // ⌘C：复制光标处的色值。放大面板上就写着这个提示 ——
+        // 提示里写了快捷键，就必须真的能按。面板现在是常驻的，
+        // 所以不再限定在取色器下：画着线想顺手取个色，不该逼人先切工具。
+        if cmd, event.charactersIgnoringModifiers?.lowercased() == "c", Prefs.loupeEnabled {
             guard let v = views.first(where: { $0.hasMousePoint }), let st = activeCanvas,
                   let hex = v.copyColourUnderCursor(canvas: st) else { return false }
             flashStatus(LS("Farbe \(hex) kopiert", "Colour \(hex) copied",

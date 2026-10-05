@@ -34,6 +34,7 @@ enum Prefs {
         static let frameStyle = "frameStyle"
         static let fixedRegion = "fixedRegion"
         static let freeRegion = "freeRegion"
+        static let loupeEnabled = "loupeEnabled"
         static let defaultTool = "defaultTool"
         static let language = "language"
         static let hotKeyCode = "hotKeyCode"
@@ -202,6 +203,13 @@ enum Prefs {
     }
 
     /// 选区工具是否使用自由手绘（多边形）而不是矩形
+    /// 光标旁常驻的放大面板。默认开 —— 取色的难点是"看不清点的是哪个像素"，
+    /// 而这个问题在你还没切到取色器时就已经存在了。
+    static var loupeEnabled: Bool {
+        get { d.object(forKey: K.loupeEnabled) as? Bool ?? true }   // 未设置过 → 默认开
+        set { d.set(newValue, forKey: K.loupeEnabled) }
+    }
+
     static var freeRegion: Bool {
         get { d.bool(forKey: K.freeRegion) }
         set { d.set(newValue, forKey: K.freeRegion) }

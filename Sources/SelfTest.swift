@@ -1740,12 +1740,17 @@ enum SelfTest {
                 $0.keyEquivalent.lowercased() == "c"
                     && $0.keyEquivalentModifierMask == [.command, .shift]
             }
+            // 失败信息要写清"实际绑到了谁"，否则下次看到这条只会一头雾水
+            func describe(_ it: NSMenuItem?) -> String {
+                guard let it else { return "菜单里没有这一项" }
+                return "\(it.title) → \(it.action.map(NSStringFromSelector) ?? "无动作")"
+            }
             check("⌘C 绑定到「复制色值」",
                   plainC?.action == #selector(NSObject.menuCopyColourPublic),
-                  plainC.map { "\($0.title)" } ?? "菜单里没有 ⌘C")
+                  describe(plainC))
             check("⌘⇧C 绑定到「复制截图」",
                   shiftC?.action == #selector(NSObject.menuCopyPublic),
-                  shiftC.map { "\($0.title)" } ?? "菜单里没有 ⌘⇧C")
+                  describe(shiftC))
             check("没有第二条菜单项抢 ⌘C",
                   actionMenu.items.filter {
                       $0.keyEquivalent.lowercased() == "c" && $0.keyEquivalentModifierMask == [.command]

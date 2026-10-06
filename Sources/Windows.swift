@@ -559,7 +559,14 @@ final class SessionController: NSObject, NSMenuDelegate {
             w.backgroundColor = .black
             w.hasShadow = false
             w.level = .screenSaver
-            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            // **覆盖层用 .moveToActiveSpace，不是 .canJoinAllSpaces。**
+            //
+            // 全屏应用有自己独立的 Space。用 .canJoinAllSpaces 时，窗口会"加入所有
+            // Space"，但在激活过程中它可能落在一个**当前不可见**的 Space 上 ——
+            // 日志里就是 onActiveSpace=false，用户看到的是"什么都没冻结"。
+            // .moveToActiveSpace 明确要求：应用激活时把窗口搬到活动 Space。
+            // （两者互斥，不能同时设。）
+            w.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .ignoresCycle]
             w.acceptsMouseMovedEvents = true
             w.isReleasedWhenClosed = false
             w.contentView = view
@@ -579,6 +586,17 @@ final class SessionController: NSObject, NSMenuDelegate {
                      + "onActiveSpace=\(w.isOnActiveSpace)")
         }
         if let f = NSApp.keyWindow { Diag.log("  当前 keyWindow: \(f.title.isEmpty ? "(无标题)" : f.title)") }
+
+        // 激活是**异步**的：系统切换 Space 需要一点时间，而全屏应用有自己独立的 Space。
+        // 窗口如果在切换完成前就 orderFront，会落在"切换后"的 Space 上 ——
+        // 日志里就是 onActiveSpace=false，用户看到的是"什么都没冻结"。
+        // 等一切稳定后重新置前一次，并把这个状态记下来以便验证。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.isActive else { return }
+            for w in self.windows { w.orderFrontRegardless() }
+            let onActive = self.windows.first?.isOnActiveSpace ?? false
+            Diag.log("重新置前后: onActiveSpace=\(onActive)  visible=\(self.windows.first?.isVisible ?? false)")
+        }
         guard !canvases.isEmpty else {
             Diag.log("⚠️ 没有可用画布 → 结束会话（用户会看到「什么都没发生」）")
             finish(quiet: true); return

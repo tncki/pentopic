@@ -547,6 +547,9 @@ xattr -dr com.apple.quarantine /Applications/PentoPic.app
 - 应用只读取屏幕，所有处理都在**本机**完成
 - 不上传、不联网、不含统计或崩溃上报
 - 捕捉历史存在本机 `~/Library/Application Support/PentoPic/History/`
+- **会话诊断日志**存在本机 `~/Library/Logs/PentoPic/session.log`，每次启动覆盖。
+  它只记录冻结那一刻的窗口**层级与应用名**，用于排查"按了开始却没反应"这类问题；
+  **不记录窗口标题、不记录画面内容**，也不发送到任何地方。
 - 「打开截图文件夹」之类的链接是交给**访达**处理的，不是应用联网
 
 见 [`Resources/PrivacyInfo.xcprivacy`](Resources/PrivacyInfo.xcprivacy)。

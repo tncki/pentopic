@@ -977,14 +977,16 @@ enum Diag {
             return
         }
         log("  屏幕上共 \(list.count) 个窗口，按层级排序（覆盖窗口应为 1000）:")
+        // **只记应用名与层级，不记窗口标题。**
+        // 窗口标题会暴露用户在看什么网页、编辑什么文档 —— 诊断只需要层级信息，
+        // 为了修一个 bug 而把用户的内容写进日志是不划算的。
         let rows = list.compactMap { w -> (Int, String)? in
             let level = w[kCGWindowLayer as String] as? Int ?? 0
             let owner = w[kCGWindowOwnerName as String] as? String ?? "?"
-            let name = w[kCGWindowName as String] as? String ?? ""
-            return (level, "\(owner) \(name)")
+            return (level, owner)
         }.sorted { $0.0 > $1.0 }
-        for (level, desc) in rows.prefix(18) {
-            log("    level=\(level)  \(desc)")
+        for (level, owner) in rows.prefix(18) {
+            log("    level=\(level)  \(owner)")
         }
     }
 }

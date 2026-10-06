@@ -105,6 +105,7 @@ cp release.conf.example release.conf      # 填证书名 / Team ID / profile 名
 | `Resources/entitlements-developerid.plist` | Developer ID 用（不沙箱，最小权限） |
 | `Resources/entitlements-mas.plist` | Mac App Store 用（沙箱，另需代码改造） |
 | `Resources/PrivacyInfo.xcprivacy` | 隐私清单：不追踪、不收集数据 |
+| `~/Library/Logs/PentoPic/session.log` | 会话诊断日志（本机、每次覆盖）：只记窗口层级与应用名，**不记标题、不记画面、不外发** |
 | `.github/workflows/` | CI 构建校验 + 打 tag 自动发布 Release |
 | `notarize.sh` | 签名校验 → 公证 → 装订 → `spctl` 实测 |
 

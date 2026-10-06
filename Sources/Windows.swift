@@ -418,6 +418,10 @@ final class SessionController: NSObject, NSMenuDelegate {
     private var hostingView: NSHostingView<ToolbarView>?
     var magnifier: MagnifierPanel?
     private var tooltip: TooltipPanel?
+    /// 自检用：冻结那一刻本应用是不是已经是前台。
+    /// 必须为 false —— 为 true 说明我们冻结的是"被自己打断之后"的画面。
+    private(set) var appWasActiveAtCapture = false
+
     private var countdown: CountdownPanel?
     private var colorInfo: ColorInfoPanel?
     private var toast: ToastPanel?
@@ -467,6 +471,25 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     private func performStart(synchronously: Bool) {
         previousApp = NSWorkspace.shared.frontmostApplication
+
+        // **先冻结，再激活自己。这个顺序不能反。**
+        //
+        // 本应用一旦成为前台，别的 App 就失去焦点：窗口标题栏由彩色变灰、
+        // 菜单栏切换、光标形态也可能改变。如果先激活再截图，冻结下来的是
+        // "被我们打断之后"的画面，而不是用户按下「开始」那一刻看到的画面。
+        //
+        // 那 80ms 的等待本来是为了"让启动按钮先消失"，其实是多余的：
+        // 捕获用的 SCContentFilter 已经排除了本应用自己的窗口，
+        // 启动按钮根本不会进入截图。等待换来的只有画面被改掉。
+        let screens = NSScreen.screens
+        var caps: [CGDirectDisplayID: CapturedScreen] = [:]
+        appWasActiveAtCapture = NSApp.isActive
+        for s in screens {
+            if let c = ScreenCapture.capture(screen: s) {
+                caps[ScreenCapture.displayID(of: s)] = c
+            }
+        }
+
         // **必须先切成 .regular，再激活。**
         // 反过来的话（先以 .accessory 激活、之后才改策略），系统会把本 App
         // 当成"新注册的 App"追加到 ⌘Tab 列表末尾 —— 用户按一次 ⌘Tab 回不来，
@@ -480,25 +503,6 @@ final class SessionController: NSObject, NSMenuDelegate {
         startPanel?.orderOut(nil)
         Prefs.ensureFolders()
 
-        let screens = NSScreen.screens
-        if synchronously {
-            captureAndBuild(screens: screens)
-        } else {
-            // 稍等一拍让启动按钮消失，再冻结屏幕
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-                // 这 80ms 内用户可能已经按了 F9 取消，必须重新确认状态
-                guard let self, self.isActive else { return }
-                self.captureAndBuild(screens: screens)
-            }
-        }
-    }
-
-    private func captureAndBuild(screens: [NSScreen]) {
-        guard isActive else { return }
-        var caps: [CGDirectDisplayID: CapturedScreen] = [:]
-        for s in screens {
-            if let c = ScreenCapture.capture(screen: s) { caps[ScreenCapture.displayID(of: s)] = c }
-        }
         buildSession(screens: screens, captured: caps)
     }
 

@@ -207,6 +207,11 @@ enum SelfTest {
         let sc = SessionController.shared
         sc.start(synchronously: true)
         pump(0.4)
+        // 冻结必须发生在**激活自己之前**：一旦本应用成为前台，别的 App 就失去焦点
+        // （标题栏转灰、菜单栏切换），冻结下来的就不是用户按下「开始」时看到的画面。
+        check("冻结发生在激活之前", !sc.appWasActiveAtCapture,
+              sc.appWasActiveAtCapture ? "冻结时本应用已在前台 —— 截到的是被打断后的画面"
+                                       : "✅ 先冻结、后激活")
         log("  诊断: isActive=\(sc.isActive) canvases=\(sc.canvases.count) views=\(sc.allViews().count)")
         for s in NSScreen.screens {
             log("  屏幕 \(Int(s.frame.width))×\(Int(s.frame.height)) displayID=\(ScreenCapture.displayID(of: s))")

@@ -705,9 +705,7 @@ final class CanvasView: NSView {
         let magH = Self.loupeMagHeight
         let rowH = Self.loupeRowHeight
         let padX: CGFloat = 14
-        let infoH = rowH * 3 + 12
         let radius: CGFloat = 12
-        let h = Self.loupeHeight
 
         let px = min(max(Int(mousePoint.x * state.scale), 0), full.width - 1)
         let py = min(max(Int(mousePoint.y * state.scale), 0), full.height - 1)

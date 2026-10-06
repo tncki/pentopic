@@ -1,4 +1,4 @@
-# PentoPic 1.0.1
+# PentoPic 1.0.2
 
 **把屏幕冻结成画板，直接在画面上讲解。**
 
@@ -7,6 +7,24 @@ PentoPic 是一个 macOS 屏幕标注工具：按一下热键，当前屏幕就�
 然后保存、复制或发送。
 
 > 经 Pointofix 原作者许可发布 —— 详见下方「与 Pointofix 的关系」。
+
+---
+
+## 1.0.2 修了什么
+
+### 修复
+
+- **全屏应用下点「开始」没有反应**。全屏应用有自己独立的 Space，而激活是异步的 ——
+  覆盖层在 Space 切换完成前就置前，落在一个**当前不可见**的 Space 上。
+  窗口模式不受影响，所以这个问题藏了一阵子。
+- **冻结的是「被自己打断之后」的画面**。原先先激活本应用、再延迟 80ms 截图，
+  而那 80ms 里别的窗口已经失去焦点（标题栏由彩色变灰）。
+  现在**先冻结、再激活**，冻下来的就是你按下「开始」那一刻看到的画面。
+
+### 新增
+
+- **会话诊断日志** `~/Library/Logs/PentoPic/session.log`：只记窗口层级与应用名，
+  **不记标题、不记画面、不外发**。上面那个全屏缺陷正是靠它定位的。
 
 ---
 
@@ -62,7 +80,7 @@ PentoPic 是一个 macOS 屏幕标注工具：按一下热键，当前屏幕就�
 
 ### 方式一：下载预编译版本（推荐给大多数用户）
 
-下载下方的 `PentoPic-1.0.1-universal.zip`（Intel + Apple Silicon 通用），
+下载下方的 `PentoPic-1.0.2-universal.zip`（Intel + Apple Silicon 通用），
 解压后把 `PentoPic.app` 拖进「应用程序」。
 
 **首次打开需要多做一步。** 本版本**未经 Apple 公证**（公证需要每年 $99 的
@@ -170,4 +188,4 @@ non-objection, not an endorsement.
 
 **许可证** MIT · **隐私** 不收集数据、不联网 · **源码** [github.com/tncki/pentopic](https://github.com/tncki/pentopic)
 
-*PentoPic 1.0.1 · © 2026 Zhao Bin*
+*PentoPic 1.0.2 · © 2026 Zhao Bin*

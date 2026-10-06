@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         installAppSwitchObserver()
+        Diag.reset()
 
         // 菜单要先建好，**在自检分支之前**。
         // 早先 buildMainMenu() 在自检的 return 之后 —— 于是自检下 NSApp.mainMenu 是 nil，

@@ -914,3 +914,77 @@ final class AnnotationLayer {
 
     func snapshot() -> CGImage? { ctx.makeImage() }
 }
+
+// MARK: - 会话诊断日志
+
+/// 会话启动时的现场记录。
+///
+/// 存在的理由很具体：用户报告"按开始完全没反应"，而这类问题在开发机上无法复现 ——
+/// 关键在于**当时屏幕上还有哪些窗口、覆盖窗口是不是被压在下面**，
+/// 这些从代码里读不出来。把现场写进日志，比反复推测快得多。
+///
+/// 写到 `~/Library/Logs/PentoPic/session.log`。不联网、不上传，每次启动覆盖。
+enum Diag {
+    static let url: URL = {
+        let fm = FileManager.default
+        let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library")
+        let dir = lib.appendingPathComponent("Logs/PentoPic", isDirectory: true)
+        if (try? fm.createDirectory(at: dir, withIntermediateDirectories: true)) != nil,
+           fm.isWritableFile(atPath: dir.path) {
+            return dir.appendingPathComponent("session.log")
+        }
+        // 回退：写在应用旁边。某些启动方式（沙箱里调用、U 盘运行）下 ~/Library 不可写，
+        // 这时宁可放在能找到的地方，也不要静默丢弃诊断信息。
+        return Bundle.main.bundleURL.deletingLastPathComponent()
+            .appendingPathComponent("PentoPic-session.log")
+    }()
+
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    private static let lock = NSLock()
+
+    /// 每次启动清空，只保留本次运行
+    static func reset() {
+        lock.lock(); defer { lock.unlock() }
+        let head = "PentoPic \(Brand.version) 诊断日志  开始于 \(Date())\n"
+        try? head.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    static func log(_ s: String) {
+        lock.lock(); defer { lock.unlock() }
+        let line = "[\(stamp.string(from: Date()))] \(s)\n"
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(Data(line.utf8))
+            try? h.close()
+        } else {
+            try? line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// 把当前屏幕上的窗口按**层级从高到低**记下来。
+    /// 覆盖窗口用的是 .screenSaver（1000）—— 如果这里出现比它更高层的窗口，
+    /// 那就是"冻结了却看不见"的原因。
+    static func logWindowStack() {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else {
+            log("  窗口列表不可读")
+            return
+        }
+        log("  屏幕上共 \(list.count) 个窗口，按层级排序（覆盖窗口应为 1000）:")
+        let rows = list.compactMap { w -> (Int, String)? in
+            let level = w[kCGWindowLayer as String] as? Int ?? 0
+            let owner = w[kCGWindowOwnerName as String] as? String ?? "?"
+            let name = w[kCGWindowName as String] as? String ?? ""
+            return (level, "\(owner) \(name)")
+        }.sorted { $0.0 > $1.0 }
+        for (level, desc) in rows.prefix(18) {
+            log("    level=\(level)  \(desc)")
+        }
+    }
+}

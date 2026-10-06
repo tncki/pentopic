@@ -453,9 +453,13 @@ final class SessionController: NSObject, NSMenuDelegate {
     func installStartPanel(_ p: StartButtonPanel) { startPanel = p }
 
     func start(synchronously: Bool = false) {
-        guard !isActive else { return }
+        Diag.reset()
+        Diag.log("start() 被调用  synchronously=\(synchronously) isActive=\(isActive)")
+        guard !isActive else { Diag.log("  → 已有会话在进行，忽略"); return }
         // ensure() 在已授权时立即返回 true；否则循环引导授权，拿到权限后继续启动
-        guard ScreenPermission.ensure() else { return }
+        let granted = ScreenPermission.ensure()
+        Diag.log("  屏幕录制权限: \(granted ? "已授予" : "未授予")")
+        guard granted else { return }
 
         // 延时捕捉：先把界面让给用户摆好（比如展开一个菜单），倒计时结束再冻结
         let delay = synchronously ? 0 : Prefs.captureDelay
@@ -471,6 +475,10 @@ final class SessionController: NSObject, NSMenuDelegate {
 
     private func performStart(synchronously: Bool) {
         previousApp = NSWorkspace.shared.frontmostApplication
+        Diag.log("performStart  前台应用=\(previousApp?.localizedName ?? "?")")
+        // 冻结之前先记下屏幕上有什么 —— 如果这里有窗口层级高于 1000，
+        // 覆盖窗口就会被压在下面，用户看到的就是"什么都没冻结"。
+        Diag.logWindowStack()
 
         // **先冻结，再激活自己。这个顺序不能反。**
         //
@@ -484,11 +492,18 @@ final class SessionController: NSObject, NSMenuDelegate {
         let screens = NSScreen.screens
         var caps: [CGDirectDisplayID: CapturedScreen] = [:]
         appWasActiveAtCapture = NSApp.isActive
+        Diag.log("开始冻结，共 \(screens.count) 块屏幕  本应用是否前台=\(appWasActiveAtCapture)")
+        let t0 = Date()
         for s in screens {
+            let id = ScreenCapture.displayID(of: s)
             if let c = ScreenCapture.capture(screen: s) {
-                caps[ScreenCapture.displayID(of: s)] = c
+                caps[id] = c
+                Diag.log("  屏幕 displayID=\(id) 冻结成功 \(c.cgImage.width)×\(c.cgImage.height)")
+            } else {
+                Diag.log("  ⚠️ 屏幕 displayID=\(id) 冻结失败（返回 nil）")
             }
         }
+        Diag.log("  冻结耗时 \(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000)) ms，成功 \(caps.count)/\(screens.count)")
 
         // **必须先切成 .regular，再激活。**
         // 反过来的话（先以 .accessory 激活、之后才改策略），系统会把本 App
@@ -557,7 +572,17 @@ final class SessionController: NSObject, NSMenuDelegate {
             if target == nil { target = st }
         }
 
-        guard !canvases.isEmpty else { finish(quiet: true); return }
+        Diag.log("会话构建: 画布 \(canvases.count) 块  窗口 \(windows.count) 个")
+        for (i, w) in windows.enumerated() {
+            Diag.log("  窗口 \(i): visible=\(w.isVisible) level=\(w.level.rawValue) "
+                     + "alpha=\(w.alphaValue) frame=\(Int(w.frame.width))×\(Int(w.frame.height)) "
+                     + "onActiveSpace=\(w.isOnActiveSpace)")
+        }
+        if let f = NSApp.keyWindow { Diag.log("  当前 keyWindow: \(f.title.isEmpty ? "(无标题)" : f.title)") }
+        guard !canvases.isEmpty else {
+            Diag.log("⚠️ 没有可用画布 → 结束会话（用户会看到「什么都没发生」）")
+            finish(quiet: true); return
+        }
 
         // 安全网：权限显示已授予，但 ScreenCaptureKit 一张图都没拿到
         // （刚勾选权限、TCC 尚未对本进程生效时会发生）→ 明确告知需要重启

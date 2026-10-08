@@ -1725,6 +1725,32 @@ enum SelfTest {
         check("失效区确实比面板大", probeInvalid.width > probePanel.width + 20,
               String(format: "面板 %.0f 宽，失效 %.0f 宽", probePanel.width, probeInvalid.width))
 
+        // HUD 与放大面板**互斥**：两者都贴着光标画，同时出现必然互相遮挡。
+        // 用户报的就是这个：坐标被面板盖住了。
+        let hudPref = Prefs.loupeEnabled
+        view.setHoverForTest(loupeProbe)
+        Prefs.loupeEnabled = true
+        sc.setTool(.pen); pump(0.1); pump(0.3)
+        _ = renderView()
+        check("面板显示时 HUD 让位（不重叠）", !view.hudDrawnForTest,
+              view.hudDrawnForTest ? "两个都在画 —— 会互相遮挡" : "✅ 只有面板")
+        Prefs.loupeEnabled = false
+        pump(0.1); pump(0.3)
+        _ = renderView()
+        check("面板关闭后 HUD 接回坐标显示", view.hudDrawnForTest,
+              view.hudDrawnForTest ? "✅" : "两边都没有，坐标就丢了")
+        Prefs.loupeEnabled = hudPref
+
+        // 选区工具时面板多一行（尺寸原本在 HUD 里，被盖住后挪进面板）
+        sc.setTool(.pen); pump(0.1)
+        let rowsPen = view.loupeRowCountForTest
+        sc.setTool(.region); st.region = CGRect(x: 200, y: 200, width: 300, height: 200); pump(0.1)
+        let rowsRegion = view.loupeRowCountForTest
+        check("选区工具下面板多一行显示尺寸", rowsRegion == rowsPen + 1,
+              "画笔 \(rowsPen) 行 → 选区 \(rowsRegion) 行")
+        st.region = nil
+        sc.setTool(.pen); pump(0.1)
+
         // 关掉之后，屏幕上的残留面板必须被清掉（而不是等下一次别的重绘）
         Prefs.loupeEnabled = true
         view.setHoverForTest(loupeProbe); pump(0.2)

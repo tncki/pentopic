@@ -660,7 +660,11 @@ final class CanvasView: NSView {
     static let loupeWidth: CGFloat = 158
     static let loupeMagHeight: CGFloat = 104
     static let loupeRowHeight: CGFloat = 21
-    static var loupeHeight: CGFloat { loupeMagHeight + 1 + loupeRowHeight * 3 + 12 }
+    /// 常驻三行：坐标、色值、快捷键提示。选区工具会多一行尺寸。
+    static let loupeBaseRows = 3
+    static func loupeHeight(rows: Int) -> CGFloat {
+        loupeMagHeight + 1 + loupeRowHeight * CGFloat(rows) + 12
+    }
 
     /// 面板阴影响外延伸的范围（blur + offset）。失效区域必须至少外扩这么多，
     /// 否则移走面板时**阴影外圈会留在屏幕上**，就是肉眼看到的残影。
@@ -677,8 +681,34 @@ final class CanvasView: NSView {
     /// 自检用：面板阴影实际向外延伸的范围（blur + offset）
     static let loupeShadowExtent: CGFloat = 14 + 3
 
+    /// 当前面板该有几行。几何、绘制、失效区域必须都用这一个数 ——
+    /// 分开算的话，选区工具下多出来的那一行会让三处对不上。
+    private var loupeRowCount: Int {
+        guard let c = controller else { return Self.loupeBaseRows }
+        if c.tool == .region, state.region != nil || (state.regionPath?.count ?? 0) >= 2 {
+            return Self.loupeBaseRows + 1
+        }
+        return Self.loupeBaseRows
+    }
+
+    /// 选区尺寸（原来是 HUD 里的那一句）。面板显示时 HUD 让位，所以挪到这里。
+    private var loupeRegionSize: String? {
+        guard let c = controller, c.tool == .region else { return nil }
+        if let path = state.regionPath, path.count >= 2 {
+            let xs = path.map { $0.x }, ys = path.map { $0.y }
+            return "\(Int((xs.max()! - xs.min()!) * state.scale))×\(Int((ys.max()! - ys.min()!) * state.scale))"
+        }
+        if let r = state.region { return "\(Int(r.width * state.scale))×\(Int(r.height * state.scale))" }
+        return nil
+    }
+
+    /// 放大面板是否正在显示。HUD 与它互斥 —— 两者都贴着光标画，同时出现必然互相遮挡。
+    private var loupeIsShowing: Bool {
+        Prefs.loupeEnabled && hasMouse && !state.isZoomed && controller?.tool != .magnifier
+    }
+
     func loupeRect(for p: CGPoint) -> CGRect {
-        let w = Self.loupeWidth, h = Self.loupeHeight
+        let w = Self.loupeWidth, h = Self.loupeHeight(rows: loupeRowCount)
         var ox = p.x + 22, oy = p.y + 22
         if ox + w > bounds.maxX - 6 { ox = p.x - 22 - w }
         if oy + h > bounds.maxY - 6 { oy = p.y - 22 - h }
@@ -701,6 +731,7 @@ final class CanvasView: NSView {
         }
         guard let full = state.zoomSource() else { return }   // 带缓存，悬停时不会每帧重合成
 
+        let rowCount = loupeRowCount
         let w = Self.loupeWidth
         let magH = Self.loupeMagHeight
         let rowH = Self.loupeRowHeight
@@ -802,6 +833,12 @@ final class CanvasView: NSView {
         text(LS("Farbe", "Colour", "色值", "色值"), labelX, rowY, 11.5, labelColor, false, false)
         text(col.hexString, valueX, rowY, 12.5, valueColor, true, true)
         rowY += rowH
+        // 选区尺寸：原来在 HUD 里，但 HUD 与面板都贴着光标，会被面板盖住
+        if let size = loupeRegionSize {
+            text(LS("Auswahl", "Selection", "选区", "選取"), labelX, rowY, 11.5, labelColor, false, false)
+            text(size, valueX, rowY, 12.5, valueColor, true, true)
+            rowY += rowH
+        }
         text(LS("⌘+C kopiert den Farbwert", "⌘+C copies the colour",
                 "按 ⌘+C 复制色值", "按 ⌘+C 複製色值"),
              labelX, rowY, 10,
@@ -931,7 +968,19 @@ final class CanvasView: NSView {
         (label as NSString).draw(at: NSPoint(x: r.minX + 3, y: r.minY - 1), withAttributes: attrs)
     }
 
+    /// 自检用：上一次实际画出 HUD 了没有。
+    /// HUD 与放大面板都贴着光标画，**绝不能同时出现** —— 这是用户报过的 bug。
+    private(set) var hudDrawnForTest = false
+    /// 自检用：面板当前行数
+    var loupeRowCountForTest: Int { loupeRowCount }
+    var loupeIsShowingForTest: Bool { loupeIsShowing }
+
     private func drawHUD() {
+        hudDrawnForTest = false
+        // 放大面板显示时 HUD 整个让位：两者都**贴着光标**画（HUD 原点是
+        // mousePoint + (16,18)），同时出现必然互相遮挡，而坐标、色值、选区尺寸
+        // 面板里都已经有了。缩放视图里没有面板，HUD 照常工作。
+        guard !loupeIsShowing else { return }
         guard let c = controller, hasMouse else { return }
         let px = Int(mousePoint.x * state.scale)
         let py = Int(mousePoint.y * state.scale)
@@ -955,6 +1004,7 @@ final class CanvasView: NSView {
         }
         guard !parts.isEmpty else { return }
         let text = parts.joined(separator: "   ")
+        hudDrawnForTest = true
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor.white

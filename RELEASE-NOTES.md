@@ -1,4 +1,4 @@
-# PentoPic 1.0.2
+# PentoPic 1.0.3
 
 **把屏幕冻结成画板，直接在画面上讲解。**
 
@@ -7,6 +7,16 @@ PentoPic 是一个 macOS 屏幕标注工具：按一下热键，当前屏幕就�
 然后保存、复制或发送。
 
 > 经 Pointofix 原作者许可发布 —— 详见下方「与 Pointofix 的关系」。
+
+---
+
+## 1.0.3 修了什么
+
+### 修复
+
+- **光标旁的坐标浮层被放大面板遮挡**。两者都贴着光标绘制，同时出现必然重叠 ——
+  而且显示的内容本来就重复。现在面板显示时浮层让位，**坐标、色值、选区尺寸都在面板里**。
+  关掉面板、或进入缩放视图，浮层照常回来，坐标不会丢。
 
 ---
 
@@ -80,7 +90,7 @@ PentoPic 是一个 macOS 屏幕标注工具：按一下热键，当前屏幕就�
 
 ### 方式一：下载预编译版本（推荐给大多数用户）
 
-下载下方的 `PentoPic-1.0.2-universal.zip`（Intel + Apple Silicon 通用），
+下载下方的 `PentoPic-1.0.3-universal.zip`（Intel + Apple Silicon 通用），
 解压后把 `PentoPic.app` 拖进「应用程序」。
 
 **首次打开需要多做一步。** 本版本**未经 Apple 公证**（公证需要每年 $99 的
@@ -188,4 +198,4 @@ non-objection, not an endorsement.
 
 **许可证** MIT · **隐私** 不收集数据、不联网 · **源码** [github.com/tncki/pentopic](https://github.com/tncki/pentopic)
 
-*PentoPic 1.0.2 · © 2026 Zhao Bin*
+*PentoPic 1.0.3 · © 2026 Zhao Bin*

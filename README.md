@@ -47,7 +47,7 @@
 推 tag 就自动构建并发布（`.github/workflows/release.yml`）：
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.0.4 && git push origin v1.0.4
 ```
 
 CI 打出的是**通用二进制**（`x86_64 + arm64` 合一，一个包两种 Mac 都能跑）。

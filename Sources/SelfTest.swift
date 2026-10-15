@@ -1872,6 +1872,46 @@ enum SelfTest {
             check("展开后完全在屏幕内", expandScreen.visibleFrame.insetBy(dx: -1, dy: -1).contains(panel.frame),
                   String(format: "%.0f,%.0f", panel.frame.minX, panel.frame.minY))
         }
+        // ---- 拖动指示灯：窗口要跟着走，而且不能误判成点击 → 直接开始会话 ----
+        var startFired = false
+        let dragPanel = StartButtonPanel { startFired = true }
+        dragPanel.setMinimised(true, persist: false); pump(0.2)
+        func mouseEvent(_ type: NSEvent.EventType, _ win: Int) -> NSEvent? {
+            NSEvent.mouseEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0,
+                               windowNumber: win, context: nil,
+                               eventNumber: 0, clickCount: 1, pressure: 1)
+        }
+        if let led = dragPanel.ledViewForTest,
+           let down = mouseEvent(.leftMouseDown, dragPanel.windowNumber),
+           let move = mouseEvent(.leftMouseDragged, dragPanel.windowNumber),
+           let up = mouseEvent(.leftMouseUp, dragPanel.windowNumber) {
+            let before = dragPanel.frame.origin
+            let anchor = NSPoint(x: 600, y: 600)
+            StartButtonPanel.LedView.mouseLocationOverrideForTest = anchor
+            led.mouseDown(with: down)
+            StartButtonPanel.LedView.mouseLocationOverrideForTest = NSPoint(x: anchor.x + 60, y: anchor.y + 40)
+            led.mouseDragged(with: move)
+            led.mouseUp(with: up)
+            StartButtonPanel.LedView.mouseLocationOverrideForTest = nil
+            let after = dragPanel.frame.origin
+            check("拖动指示灯会移动窗口",
+                  abs((after.x - before.x) - 60) < 1.5 && abs((after.y - before.y) - 40) < 1.5,
+                  String(format: "位移 %.0f,%.0f（应为 60,40）", after.x - before.x, after.y - before.y))
+            check("拖动不会被误判成点击", !startFired,
+                  startFired ? "拖一下就开始了会话" : "✅ 只移动，不开始")
+
+            // 原地点击才应当开始
+            StartButtonPanel.LedView.mouseLocationOverrideForTest = anchor
+            led.mouseDown(with: down)
+            led.mouseUp(with: up)
+            StartButtonPanel.LedView.mouseLocationOverrideForTest = nil
+            check("原地点击指示灯会开始标注", startFired,
+                  startFired ? "✅" : "点了却没反应")
+        } else {
+            check("能拿到指示灯视图", false, "最小化后没找到 LedView")
+        }
+        dragPanel.orderOut(nil)
+
         panel.orderOut(nil)
         Prefs.startBtnMinimised = savedMini
 

@@ -1929,7 +1929,7 @@ final class StartButtonPanel: NSPanel {
     }
 
     /// 指示灯本体。单独一个视图，方便自己管绘制与悬停高亮。
-    private final class LedView: NSView {
+    final class LedView: NSView {
         var onStart: (() -> Void)?
         var onExpand: (() -> Void)?
         private var hovering = false { didSet { needsDisplay = true } }
@@ -1946,16 +1946,42 @@ final class StartButtonPanel: NSPanel {
         override func mouseExited(with event: NSEvent) { hovering = false }
         override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 
-        // 手动拖窗口：视图一旦接管 mouseDown，isMovableByWindowBackground 就不再生效。
-        // 拖动结束后拿起止点判断"点击"还是"拖动" —— 差得足够小才算点击，
-        // 否则每次拖它都会误触开始。
+        // **手动拖动，不用 `performDrag`。**
+        // 那个 API 对 `.nonactivatingPanel` 不生效：窗口根本不动，而松手时
+        // 起止点相同，于是每次想拖都会被判成"点击"→ 直接开始会话。
+        /// 自检用：覆盖"当前鼠标位置"。
+        /// 拖动读的是 `NSEvent.mouseLocation`（屏幕坐标，不随窗口移动而改变，
+        /// 所以窗口跟着走时拖动不会中断）—— 合成事件改不了它，只能留个注入口。
+        static var mouseLocationOverrideForTest: NSPoint?
+        private static var currentMouse: NSPoint {
+            mouseLocationOverrideForTest ?? NSEvent.mouseLocation
+        }
+
+        private var dragOrigin: NSPoint?
+        private var dragAnchor: NSPoint?
+        private var moved = false
+
         override func mouseDown(with event: NSEvent) {
             if event.modifierFlags.contains(.option) { onExpand?(); return }
-            let start = event.locationInWindow
-            window?.performDrag(with: event)
-            let end = event.locationInWindow
-            if hypot(end.x - start.x, end.y - start.y) < 4 { onStart?() }
+            dragAnchor = Self.currentMouse
+            dragOrigin = window?.frame.origin
+            moved = false
         }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let anchor = dragAnchor, let origin = dragOrigin, let w = window else { return }
+            let now = Self.currentMouse
+            let dx = now.x - anchor.x, dy = now.y - anchor.y
+            if hypot(dx, dy) > 3 { moved = true }
+            // 窗口跟着鼠标走，光标始终停在灯上的同一点，拖动不会中断
+            w.setFrameOrigin(NSPoint(x: origin.x + dx, y: origin.y + dy))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            defer { dragAnchor = nil; dragOrigin = nil; moved = false }
+            if !moved { onStart?() }
+        }
+
         override func rightMouseDown(with event: NSEvent) { onExpand?() }
 
         override func draw(_ dirtyRect: NSRect) {
@@ -2009,6 +2035,9 @@ final class StartButtonPanel: NSPanel {
         if on { snapToNearestEdge() } else { keepFullyOnScreen() }
         orderFrontRegardless()
     }
+
+    /// 自检用：拿到当前内容里的指示灯（未最小化时为 nil）
+    var ledViewForTest: LedView? { isMinimised ? contentView?.subviews.first as? LedView : nil }
 
     @objc private func minimiseClicked() { setMinimised(true) }
     @objc private func clicked() { onClick?() }

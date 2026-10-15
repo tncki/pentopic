@@ -1809,26 +1809,6 @@ enum LayoutConfig {
 
 // MARK: - 启动按钮小窗
 
-/// 最小化后的小图标：点一下开始标注，⌥ 点或右键展开回完整面板。
-///
-/// 用 `performDrag` 手动拖窗口，而不是依赖 `isMovableByWindowBackground` ——
-/// 视图一旦接管 mouseDown，背景拖动就不再生效。拖动结束后拿起止点判断是
-/// "点击"还是"拖动"：差得足够小才算点击，否则用户每次拖它都会误触开始。
-private final class MiniBadge: NSView {
-    var onStart: (() -> Void)?
-    var onExpand: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.option) { onExpand?(); return }
-        let start = event.locationInWindow
-        window?.performDrag(with: event)      // 阻塞，直到这次拖动结束
-        let end = event.locationInWindow
-        if hypot(end.x - start.x, end.y - start.y) < 4 { onStart?() }
-    }
-
-    override func rightMouseDown(with event: NSEvent) { onExpand?() }
-}
-
 /// 未开始标注时飘在桌面上的开始面板。
 ///
 /// 支持**最小化**：收起成一个贴边的小图标，不挡视线；再点它就能开始标注。
@@ -1839,7 +1819,13 @@ final class StartButtonPanel: NSPanel {
     private var snapWork: DispatchWorkItem?
 
     static let normalSize = NSSize(width: 150, height: 62)
-    static let miniSize = NSSize(width: 30, height: 30)
+    /// 最小化后的可点击范围。**可见的只有一个很小的红点** —— 参考翻页笔上的指示灯：
+    /// 灯本身很小，但周围留出一圈透明的点击区域，否则那么小的目标根本点不中。
+    static let miniSize = NSSize(width: 34, height: 34)
+    /// 灯体外径（深色小圆）
+    static let ledBody: CGFloat = 19
+    /// 红灯直径
+    static let ledDot: CGFloat = 8.5
 
     init(onClick: @escaping () -> Void) {
         self.onClick = onClick
@@ -1924,33 +1910,90 @@ final class StartButtonPanel: NSPanel {
         return container
     }
 
-    /// 最小化：一个方形小图标，尽量不挡视线
+    /// 最小化：一枚小小的红色指示灯，参考翻页笔上的那颗灯。
+    ///
+    /// 视觉上只占十几点，四周是一圈透明区域 —— 看得见的部分尽量小，
+    /// 点得中的范围尽量大，这是小目标唯一可行的做法。
     private func makeMiniView() -> NSView {
         let size = Self.miniSize
         let container = NSView(frame: NSRect(origin: .zero, size: size))
-        container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor(srgbRed: 0.16, green: 0.22, blue: 0.38, alpha: 0.94).cgColor
-        container.layer?.cornerRadius = 8
-        container.layer?.borderWidth = 1
-        container.layer?.borderColor = NSColor(srgbRed: 0.45, green: 0.6, blue: 0.95, alpha: 0.9).cgColor
 
-        let badge = MiniBadge(frame: NSRect(origin: .zero, size: size))
+        let badge = LedView(frame: NSRect(origin: .zero, size: size))
         badge.onStart = { [weak self] in self?.onClick?() }
         badge.onExpand = { [weak self] in self?.setMinimised(false) }
         badge.toolTip = LS("Klicken: Aufnahme starten · ⌥/Rechtsklick: ausklappen",
                            "Click: start · ⌥ or right-click: expand",
                            "点击开始标注 · ⌥点或右键展开", "點擊開始標註 · ⌥點或右鍵展開")
         container.addSubview(badge)
-
-        if let sym = NSImage(systemSymbolName: "highlighter", accessibilityDescription: nil) {
-            let iv = NSImageView(frame: NSRect(x: (size.width - 15) / 2, y: (size.height - 15) / 2,
-                                              width: 15, height: 15))
-            iv.image = sym
-            iv.contentTintColor = NSColor(srgbRed: 0.85, green: 0.91, blue: 1, alpha: 1)
-            iv.imageScaling = .scaleProportionallyUpOrDown
-            container.addSubview(iv)
-        }
         return container
+    }
+
+    /// 指示灯本体。单独一个视图，方便自己管绘制与悬停高亮。
+    private final class LedView: NSView {
+        var onStart: (() -> Void)?
+        var onExpand: (() -> Void)?
+        private var hovering = false { didSet { needsDisplay = true } }
+        private var tracking: NSTrackingArea?
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let t = tracking { removeTrackingArea(t) }
+            let t = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways],
+                                   owner: self, userInfo: nil)
+            addTrackingArea(t); tracking = t
+        }
+        override func mouseEntered(with event: NSEvent) { hovering = true }
+        override func mouseExited(with event: NSEvent) { hovering = false }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+
+        // 手动拖窗口：视图一旦接管 mouseDown，isMovableByWindowBackground 就不再生效。
+        // 拖动结束后拿起止点判断"点击"还是"拖动" —— 差得足够小才算点击，
+        // 否则每次拖它都会误触开始。
+        override func mouseDown(with event: NSEvent) {
+            if event.modifierFlags.contains(.option) { onExpand?(); return }
+            let start = event.locationInWindow
+            window?.performDrag(with: event)
+            let end = event.locationInWindow
+            if hypot(end.x - start.x, end.y - start.y) < 4 { onStart?() }
+        }
+        override func rightMouseDown(with event: NSEvent) { onExpand?() }
+
+        override func draw(_ dirtyRect: NSRect) {
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+            let body = Self.bodyRect(bounds)
+            // 深色灯体
+            ctx.setFillColor(NSColor(srgbRed: 0.10, green: 0.11, blue: 0.13,
+                                     alpha: hovering ? 0.96 : 0.82).cgColor)
+            ctx.fillEllipse(in: body)
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(hovering ? 0.35 : 0.18).cgColor)
+            ctx.setLineWidth(1)
+            ctx.strokeEllipse(in: body.insetBy(dx: 0.5, dy: 0.5))
+
+            // 红灯：带一圈光晕，像真的指示灯
+            let dot = Self.dotRect(bounds)
+            ctx.saveGState()
+            ctx.setShadow(offset: .zero, blur: hovering ? 7 : 4,
+                          color: NSColor(srgbRed: 1, green: 0.25, blue: 0.2,
+                                         alpha: hovering ? 0.95 : 0.7).cgColor)
+            ctx.setFillColor(NSColor(srgbRed: hovering ? 1.0 : 0.90,
+                                     green: hovering ? 0.30 : 0.20,
+                                     blue: hovering ? 0.26 : 0.18, alpha: 1).cgColor)
+            ctx.fillEllipse(in: dot)
+            ctx.restoreGState()
+            // 高光，让它看起来是"发光的"而不是一个红圆点
+            ctx.setFillColor(NSColor.white.withAlphaComponent(0.45).cgColor)
+            ctx.fillEllipse(in: CGRect(x: dot.minX + dot.width * 0.22, y: dot.minY + dot.height * 0.5,
+                                       width: dot.width * 0.3, height: dot.height * 0.28))
+        }
+
+        static func bodyRect(_ b: CGRect) -> CGRect {
+            CGRect(x: b.midX - StartButtonPanel.ledBody / 2, y: b.midY - StartButtonPanel.ledBody / 2,
+                   width: StartButtonPanel.ledBody, height: StartButtonPanel.ledBody)
+        }
+        static func dotRect(_ b: CGRect) -> CGRect {
+            CGRect(x: b.midX - StartButtonPanel.ledDot / 2, y: b.midY - StartButtonPanel.ledDot / 2,
+                   width: StartButtonPanel.ledDot, height: StartButtonPanel.ledDot)
+        }
     }
 
     // MARK: 状态

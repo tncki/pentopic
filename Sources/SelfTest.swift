@@ -1829,6 +1829,9 @@ enum SelfTest {
               String(format: "%.0f×%.0f → %.0f×%.0f", normalSize.width, normalSize.height,
                      panel.frame.width, panel.frame.height))
         check("最小化状态被记住", Prefs.startBtnMinimised, "")
+        // 存一张图，方便肉眼确认这枚"指示灯"到底多大、长什么样
+        panel.displayIfNeeded()
+        if let cv = panel.contentView { _ = shot(cv, "31-start-led-mini.png") }
 
         func flushEdges(_ f: CGRect, _ v: CGRect) -> [String] {
             var hits: [String] = []

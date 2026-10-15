@@ -1839,7 +1839,7 @@ final class StartButtonPanel: NSPanel {
     private var snapWork: DispatchWorkItem?
 
     static let normalSize = NSSize(width: 150, height: 62)
-    static let miniSize = NSSize(width: 46, height: 46)
+    static let miniSize = NSSize(width: 30, height: 30)
 
     init(onClick: @escaping () -> Void) {
         self.onClick = onClick
@@ -1930,7 +1930,7 @@ final class StartButtonPanel: NSPanel {
         let container = NSView(frame: NSRect(origin: .zero, size: size))
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor(srgbRed: 0.16, green: 0.22, blue: 0.38, alpha: 0.94).cgColor
-        container.layer?.cornerRadius = 11
+        container.layer?.cornerRadius = 8
         container.layer?.borderWidth = 1
         container.layer?.borderColor = NSColor(srgbRed: 0.45, green: 0.6, blue: 0.95, alpha: 0.9).cgColor
 
@@ -1943,8 +1943,8 @@ final class StartButtonPanel: NSPanel {
         container.addSubview(badge)
 
         if let sym = NSImage(systemSymbolName: "highlighter", accessibilityDescription: nil) {
-            let iv = NSImageView(frame: NSRect(x: (size.width - 22) / 2, y: (size.height - 22) / 2,
-                                              width: 22, height: 22))
+            let iv = NSImageView(frame: NSRect(x: (size.width - 15) / 2, y: (size.height - 15) / 2,
+                                              width: 15, height: 15))
             iv.image = sym
             iv.contentTintColor = NSColor(srgbRed: 0.85, green: 0.91, blue: 1, alpha: 1)
             iv.imageScaling = .scaleProportionallyUpOrDown

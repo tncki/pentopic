@@ -1817,6 +1817,9 @@ enum SelfTest {
         log("[4v] 开始面板最小化与吸附")
         let savedMini = Prefs.startBtnMinimised
         let panel = StartButtonPanel { }
+        // 先强制展开再测量：最小化状态是**持久化**的，上一次运行留下的 true
+        // 会让面板一开始就是小图标 —— 测试不能依赖外部残留状态。
+        panel.setMinimised(false, persist: false)
         panel.placeAtSavedOrDefault()
         let normalSize = panel.frame.size
         panel.setMinimised(true); pump(0.2)
@@ -1835,8 +1838,12 @@ enum SelfTest {
             if abs(f.maxY - v.maxY) < 1.5 { hits.append("上") }
             return hits
         }
-        if let sc2 = panel.screen ?? NSScreen.main {
-            let v = sc2.visibleFrame
+        // 屏幕必须有：检查写在 if let 里会被静默跳过，自检总数就会浮动，
+        // 而 README 的自校验正是比对总数 —— 那会变成随机失败。
+        let snapScreen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
+        check("能取到屏幕用于吸附校验", snapScreen != nil, snapScreen == nil ? "没有任何屏幕" : "")
+        if let snapScreen {
+            let v = snapScreen.visibleFrame
             let hit = flushEdges(panel.frame, v)
             check("最小化后贴到屏幕边缘", !hit.isEmpty, hit.isEmpty ? "四条边都没贴上" : "贴住" + hit.joined(separator: "/") + "边")
 
@@ -1858,8 +1865,8 @@ enum SelfTest {
         check("展开后恢复原尺寸", abs(panel.frame.width - StartButtonPanel.normalSize.width) < 1
                 && abs(panel.frame.height - StartButtonPanel.normalSize.height) < 1,
               String(format: "%.0f×%.0f", panel.frame.width, panel.frame.height))
-        if let sc3 = panel.screen ?? NSScreen.main {
-            check("展开后完全在屏幕内", sc3.visibleFrame.insetBy(dx: -1, dy: -1).contains(panel.frame),
+        if let expandScreen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first {
+            check("展开后完全在屏幕内", expandScreen.visibleFrame.insetBy(dx: -1, dy: -1).contains(panel.frame),
                   String(format: "%.0f,%.0f", panel.frame.minX, panel.frame.minY))
         }
         panel.orderOut(nil)

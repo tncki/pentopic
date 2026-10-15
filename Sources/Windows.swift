@@ -1809,12 +1809,41 @@ enum LayoutConfig {
 
 // MARK: - 启动按钮小窗
 
+/// 最小化后的小图标：点一下开始标注，⌥ 点或右键展开回完整面板。
+///
+/// 用 `performDrag` 手动拖窗口，而不是依赖 `isMovableByWindowBackground` ——
+/// 视图一旦接管 mouseDown，背景拖动就不再生效。拖动结束后拿起止点判断是
+/// "点击"还是"拖动"：差得足够小才算点击，否则用户每次拖它都会误触开始。
+private final class MiniBadge: NSView {
+    var onStart: (() -> Void)?
+    var onExpand: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.option) { onExpand?(); return }
+        let start = event.locationInWindow
+        window?.performDrag(with: event)      // 阻塞，直到这次拖动结束
+        let end = event.locationInWindow
+        if hypot(end.x - start.x, end.y - start.y) < 4 { onStart?() }
+    }
+
+    override func rightMouseDown(with event: NSEvent) { onExpand?() }
+}
+
+/// 未开始标注时飘在桌面上的开始面板。
+///
+/// 支持**最小化**：收起成一个贴边的小图标，不挡视线；再点它就能开始标注。
+/// 最小化状态下拖动会**吸附到最近的屏幕边缘**，像贴在屏幕边上的标签。
 final class StartButtonPanel: NSPanel {
     private var onClick: (() -> Void)?
+    private(set) var isMinimised = false
+    private var snapWork: DispatchWorkItem?
+
+    static let normalSize = NSSize(width: 150, height: 62)
+    static let miniSize = NSSize(width: 46, height: 46)
 
     init(onClick: @escaping () -> Void) {
         self.onClick = onClick
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 150, height: 62),
+        super.init(contentRect: NSRect(origin: .zero, size: Self.normalSize),
                    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         isOpaque = false
         backgroundColor = .clear
@@ -1824,7 +1853,33 @@ final class StartButtonPanel: NSPanel {
         isReleasedWhenClosed = false
         isMovableByWindowBackground = true
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 150, height: 62))
+        applyContent(minimised: Prefs.startBtnMinimised)
+
+        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification,
+                                               object: self, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            if let o = self.frame.origin as CGPoint? { Prefs.setStartOrigin(o) }
+            // 最小化时吸附。拖动过程中 didMove 会连续触发，所以延后一拍 ——
+            // 边拖边吸会和用户的手指打架。0.25 秒没再动才认为是"放下了"。
+            if self.isMinimised { self.scheduleSnap() }
+        }
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    // MARK: 外观
+
+    private func applyContent(minimised: Bool) {
+        isMinimised = minimised
+        contentView = minimised ? makeMiniView() : makeNormalView()
+        setContentSize(minimised ? Self.miniSize : Self.normalSize)
+    }
+
+    /// 完整面板：标题、徽标、最小化按钮、开始按钮
+    private func makeNormalView() -> NSView {
+        let size = Self.normalSize
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor(srgbRed: 0.16, green: 0.22, blue: 0.38, alpha: 0.94).cgColor
         container.layer?.cornerRadius = 10
@@ -1834,15 +1889,27 @@ final class StartButtonPanel: NSPanel {
         let title = NSTextField(labelWithString: Brand.name)
         title.font = .systemFont(ofSize: 12, weight: .bold)
         title.textColor = NSColor(srgbRed: 0.75, green: 0.85, blue: 1, alpha: 1)
-        title.frame = NSRect(x: 10, y: 40, width: 100, height: 16)
+        title.frame = NSRect(x: 10, y: 40, width: 76, height: 16)
         container.addSubview(title)
 
         let badge = NSTextField(labelWithString: "⌘ Mac")
         badge.font = .systemFont(ofSize: 10, weight: .medium)
         badge.textColor = NSColor(srgbRed: 0.6, green: 0.72, blue: 0.95, alpha: 1)
-        badge.frame = NSRect(x: 96, y: 41, width: 48, height: 14)
+        badge.frame = NSRect(x: 86, y: 41, width: 36, height: 14)
         badge.alignment = .right
         container.addSubview(badge)
+
+        // 最小化：收起成贴边的小图标
+        let minBtn = LightButton(frame: NSRect(x: 124, y: 39, width: 18, height: 17))
+        minBtn.title = "–"
+        minBtn.font = NSFont.systemFont(ofSize: 13, weight: .bold)
+        minBtn.target = self
+        minBtn.action = #selector(minimiseClicked)
+        minBtn.keyEquivalent = ""
+        minBtn.toolTip = LS("Minimieren (bleibt am Bildschirmrand haften)",
+                            "Minimise (snaps to the screen edge)",
+                            "最小化（可吸附到屏幕四周）", "最小化（可吸附到螢幕四周）")
+        container.addSubview(minBtn)
 
         let btn = LightButton(frame: NSRect(x: 10, y: 8, width: 130, height: 28))
         let delay = Prefs.captureDelay
@@ -1854,23 +1921,100 @@ final class StartButtonPanel: NSPanel {
         btn.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         btn.keyEquivalent = ""
         container.addSubview(btn)
-        contentView = container
-        NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification,
-                                               object: self, queue: .main) { [weak self] _ in
-            if let o = self?.frame.origin { Prefs.setStartOrigin(o) }
-        }
+        return container
     }
 
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
+    /// 最小化：一个方形小图标，尽量不挡视线
+    private func makeMiniView() -> NSView {
+        let size = Self.miniSize
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor(srgbRed: 0.16, green: 0.22, blue: 0.38, alpha: 0.94).cgColor
+        container.layer?.cornerRadius = 11
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = NSColor(srgbRed: 0.45, green: 0.6, blue: 0.95, alpha: 0.9).cgColor
 
+        let badge = MiniBadge(frame: NSRect(origin: .zero, size: size))
+        badge.onStart = { [weak self] in self?.onClick?() }
+        badge.onExpand = { [weak self] in self?.setMinimised(false) }
+        badge.toolTip = LS("Klicken: Aufnahme starten · ⌥/Rechtsklick: ausklappen",
+                           "Click: start · ⌥ or right-click: expand",
+                           "点击开始标注 · ⌥点或右键展开", "點擊開始標註 · ⌥點或右鍵展開")
+        container.addSubview(badge)
+
+        if let sym = NSImage(systemSymbolName: "highlighter", accessibilityDescription: nil) {
+            let iv = NSImageView(frame: NSRect(x: (size.width - 22) / 2, y: (size.height - 22) / 2,
+                                              width: 22, height: 22))
+            iv.image = sym
+            iv.contentTintColor = NSColor(srgbRed: 0.85, green: 0.91, blue: 1, alpha: 1)
+            iv.imageScaling = .scaleProportionallyUpOrDown
+            container.addSubview(iv)
+        }
+        return container
+    }
+
+    // MARK: 状态
+
+    func setMinimised(_ on: Bool, persist: Bool = true) {
+        guard on != isMinimised else { return }
+        // 以当前中心为准缩放，避免切换瞬间跳到屏幕角落
+        let centre = NSPoint(x: frame.midX, y: frame.midY)
+        applyContent(minimised: on)
+        if persist { Prefs.startBtnMinimised = on }
+        let size = on ? Self.miniSize : Self.normalSize
+        setFrameOrigin(NSPoint(x: centre.x - size.width / 2, y: centre.y - size.height / 2))
+        if on { snapToNearestEdge() } else { keepFullyOnScreen() }
+        orderFrontRegardless()
+    }
+
+    @objc private func minimiseClicked() { setMinimised(true) }
     @objc private func clicked() { onClick?() }
 
+    // MARK: 吸附
+
+    private func scheduleSnap() {
+        snapWork?.cancel()
+        let w = DispatchWorkItem { [weak self] in self?.snapToNearestEdge() }
+        snapWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
+    }
+
+    /// 贴到最近的那条屏幕边上（四条边都算），另一轴保持在屏幕内。
+    func snapToNearestEdge() {
+        guard let sc = screen ?? NSScreen.main else { return }
+        let v = sc.visibleFrame
+        var o = frame.origin
+        let mid = NSPoint(x: frame.midX, y: frame.midY)
+        let dLeft = mid.x - v.minX, dRight = v.maxX - mid.x
+        let dBottom = mid.y - v.minY, dTop = v.maxY - mid.y
+        let nearest = min(dLeft, dRight, dBottom, dTop)
+
+        if nearest == dLeft { o.x = v.minX }
+        else if nearest == dRight { o.x = v.maxX - frame.width }
+        else if nearest == dBottom { o.y = v.minY }
+        else { o.y = v.maxY - frame.height }
+
+        // 另一轴仍要留在屏幕里，否则贴角时会有半个图标在屏幕外
+        o.x = min(max(v.minX, o.x), v.maxX - frame.width)
+        o.y = min(max(v.minY, o.y), v.maxY - frame.height)
+        setFrameOrigin(o)
+    }
+
+    /// 展开后不要停在屏幕外 —— 从边上展开时图标会比原来宽
+    private func keepFullyOnScreen() {
+        guard let sc = screen ?? NSScreen.main else { return }
+        let v = sc.visibleFrame
+        var o = frame.origin
+        o.x = min(max(v.minX, o.x), max(v.minX, v.maxX - frame.width))
+        o.y = min(max(v.minY, o.y), max(v.minY, v.maxY - frame.height))
+        if o != frame.origin { setFrameOrigin(o) }
+    }
+
     func placeAtSavedOrDefault() {
-        if let o = Prefs.startOrigin() { setFrameOrigin(o); return }
-        if let s = NSScreen.main {
+        if let o = Prefs.startOrigin() { setFrameOrigin(o) } else if let s = NSScreen.main {
             setFrameOrigin(NSPoint(x: s.frame.maxX - frame.width - 40, y: s.frame.minY + 80))
         }
+        if isMinimised { snapToNearestEdge() } else { keepFullyOnScreen() }
     }
 }
 

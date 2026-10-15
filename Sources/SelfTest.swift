@@ -1812,7 +1812,60 @@ enum SelfTest {
             check("主菜单可读", false, "找不到「\(menuTitle)」菜单")
         }
 
-        // ---- 5. 撤销 ----
+        // ---- 4v. 开始面板：最小化与吸附到屏幕四周 ----
+        log("")
+        log("[4v] 开始面板最小化与吸附")
+        let savedMini = Prefs.startBtnMinimised
+        let panel = StartButtonPanel { }
+        panel.placeAtSavedOrDefault()
+        let normalSize = panel.frame.size
+        panel.setMinimised(true); pump(0.2)
+        check("最小化后面板变小", panel.frame.width < normalSize.width
+                && panel.frame.height < normalSize.height
+                && abs(panel.frame.width - StartButtonPanel.miniSize.width) < 1,
+              String(format: "%.0f×%.0f → %.0f×%.0f", normalSize.width, normalSize.height,
+                     panel.frame.width, panel.frame.height))
+        check("最小化状态被记住", Prefs.startBtnMinimised, "")
+
+        func flushEdges(_ f: CGRect, _ v: CGRect) -> [String] {
+            var hits: [String] = []
+            if abs(f.minX - v.minX) < 1.5 { hits.append("左") }
+            if abs(f.maxX - v.maxX) < 1.5 { hits.append("右") }
+            if abs(f.minY - v.minY) < 1.5 { hits.append("下") }
+            if abs(f.maxY - v.maxY) < 1.5 { hits.append("上") }
+            return hits
+        }
+        if let sc2 = panel.screen ?? NSScreen.main {
+            let v = sc2.visibleFrame
+            let hit = flushEdges(panel.frame, v)
+            check("最小化后贴到屏幕边缘", !hit.isEmpty, hit.isEmpty ? "四条边都没贴上" : "贴住" + hit.joined(separator: "/") + "边")
+
+            // 人为挪到屏幕正中，吸附应当把它拉回最近的边
+            panel.setFrameOrigin(NSPoint(x: v.midX, y: v.midY))
+            panel.snapToNearestEdge(); pump(0.15)
+            let hit2 = flushEdges(panel.frame, v)
+            check("从屏幕中央也会被吸到边上", !hit2.isEmpty,
+                  hit2.isEmpty ? "没有吸附" : "贴住" + hit2.joined(separator: "/") + "边")
+
+            // 另一轴不能跑到屏幕外 —— 贴角时半个图标露在外面就是 bug
+            let inside = v.insetBy(dx: -1, dy: -1)
+            check("吸附后整个图标仍在屏幕内", inside.contains(panel.frame),
+                  String(format: "%.0f,%.0f %.0f×%.0f", panel.frame.minX, panel.frame.minY,
+                         panel.frame.width, panel.frame.height))
+        }
+
+        panel.setMinimised(false); pump(0.2)
+        check("展开后恢复原尺寸", abs(panel.frame.width - StartButtonPanel.normalSize.width) < 1
+                && abs(panel.frame.height - StartButtonPanel.normalSize.height) < 1,
+              String(format: "%.0f×%.0f", panel.frame.width, panel.frame.height))
+        if let sc3 = panel.screen ?? NSScreen.main {
+            check("展开后完全在屏幕内", sc3.visibleFrame.insetBy(dx: -1, dy: -1).contains(panel.frame),
+                  String(format: "%.0f,%.0f", panel.frame.minX, panel.frame.minY))
+        }
+        panel.orderOut(nil)
+        Prefs.startBtnMinimised = savedMini
+
+        // ---- 5. 撤销 ----        // ---- 5. 撤销 ----
         log("")
         log("[5] 撤销与清空")
         // 前面的用例结尾会清空画布，这里先画两条保证有东西可撤销

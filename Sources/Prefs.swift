@@ -45,6 +45,7 @@ enum Prefs {
         static let toolbarX = "toolbarX"
         static let toolbarY = "toolbarY"
         static let startBtnX = "startBtnX"
+        static let startBtnMinimised = "startBtnMinimised"
         static let startBtnY = "startBtnY"
     }
 
@@ -355,6 +356,12 @@ enum Prefs {
     static func setToolbarOrigin(_ p: NSPoint) {
         d.set(Double(p.x), forKey: K.toolbarX); d.set(Double(p.y), forKey: K.toolbarY)
     }
+    /// 开始面板是否处于最小化（收起成贴边小图标）状态。记住用户的选择。
+    static var startBtnMinimised: Bool {
+        get { d.bool(forKey: K.startBtnMinimised) }
+        set { d.set(newValue, forKey: K.startBtnMinimised) }
+    }
+
     static func startOrigin() -> NSPoint? {
         guard d.object(forKey: K.startBtnX) != nil else { return nil }
         return NSPoint(x: d.double(forKey: K.startBtnX), y: d.double(forKey: K.startBtnY))

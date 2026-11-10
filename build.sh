@@ -152,7 +152,7 @@ ENTITLEMENTS=""
 
 if [ "$MODE" = "debug" ]; then
   if [ "$HAS_DEV_IDENTITY" = 1 ]; then
-    echo "==> 签名: $DEV_IDENTITY（自签名 —— 重编译不会使屏幕录制授权失效）"
+    echo "==> 签名: ${DEV_IDENTITY}（自签名 —— 重编译不会使屏幕录制授权失效）"
     # 注意：**不要用 --deep** —— 对未受信任的自签名证书会报 errSecInternalComponent。
     # 本 bundle 里没有嵌套代码，本来也不需要 --deep。
     if ! codesign --force --sign "$DEV_IDENTITY" "$APP"; then

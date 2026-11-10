@@ -24,7 +24,7 @@ BUNDLE="$ROOT/build/preview.app"
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$ROOT/build"
 
-echo "==> 编译预览程序（产品名: $APP_NAME）"
+echo "==> 编译预览程序（产品名: ${APP_NAME}）"
 swiftc -sdk "$SDK" -target "$TARGET" -swift-version 5 -O -module-name POFPreview \
   -module-cache-path "$CACHE/clang" \
   -framework AppKit -framework SwiftUI -framework ScreenCaptureKit -framework Carbon -framework UniformTypeIdentifiers -framework WebKit \
